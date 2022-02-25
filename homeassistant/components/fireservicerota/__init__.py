@@ -1,5 +1,6 @@
 """The FireServiceRota integration."""
-import asyncio
+from __future__ import annotations
+
 from datetime import timedelta
 import logging
 
@@ -11,11 +12,8 @@ from pyfireservicerota import (
     InvalidTokenError,
 )
 
-from homeassistant.components.binary_sensor import DOMAIN as BINARYSENSOR_DOMAIN
-from homeassistant.components.sensor import DOMAIN as SENSOR_DOMAIN
-from homeassistant.components.switch import DOMAIN as SWITCH_DOMAIN
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_TOKEN, CONF_URL, CONF_USERNAME
+from homeassistant.const import CONF_TOKEN, CONF_URL, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.dispatcher import dispatcher_send
@@ -27,7 +25,7 @@ MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=60)
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [SENSOR_DOMAIN, BINARYSENSOR_DOMAIN, SWITCH_DOMAIN]
+PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SWITCH]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -59,10 +57,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         DATA_COORDINATOR: coordinator,
     }
 
-    for platform in PLATFORMS:
-        hass.async_create_task(
-            hass.config_entries.async_forward_entry_setup(entry, platform)
-        )
+    hass.config_entries.async_setup_platforms(entry, PLATFORMS)
 
     return True
 
@@ -73,19 +68,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.async_add_executor_job(
         hass.data[DOMAIN][entry.entry_id].websocket.stop_listener
     )
-
-    unload_ok = all(
-        await asyncio.gather(
-            *[
-                hass.config_entries.async_forward_entry_unload(entry, platform)
-                for platform in PLATFORMS
-            ]
-        )
-    )
-
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         del hass.data[DOMAIN][entry.entry_id]
-
     return unload_ok
 
 
@@ -212,25 +197,25 @@ class FireServiceRotaClient:
 
                 return await self._hass.async_add_executor_job(func, *args)
 
-    async def async_update(self) -> object:
+    async def async_update(self) -> dict | None:
         """Get the latest availability data."""
         data = await self.update_call(
             self.fsr.get_availability, str(self._hass.config.time_zone)
         )
 
         if not data:
-            return
+            return None
 
         self.on_duty = bool(data.get("available"))
 
         _LOGGER.debug("Updated availability data: %s", data)
         return data
 
-    async def async_response_update(self) -> object:
+    async def async_response_update(self) -> dict | None:
         """Get the latest incident response data."""
 
         if not self.incident_id:
-            return
+            return None
 
         _LOGGER.debug("Updating response data for incident id %s", self.incident_id)
 

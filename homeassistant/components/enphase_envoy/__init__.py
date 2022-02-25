@@ -1,7 +1,6 @@
 """The Enphase Envoy integration."""
 from __future__ import annotations
 
-import asyncio
 from datetime import timedelta
 import logging
 
@@ -48,9 +47,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             except httpx.HTTPError as err:
                 raise UpdateFailed(f"Error communicating with API: {err}") from err
 
-            for condition in SENSORS:
-                if condition != "inverters":
-                    data[condition] = await getattr(envoy_reader, condition)()
+            for description in SENSORS:
+                if description.key != "inverters":
+                    data[description.key] = await getattr(
+                        envoy_reader, description.key
+                    )()
                 else:
                     data[
                         "inverters_production"
@@ -74,30 +75,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         envoy_reader.get_inverters = False
         await coordinator.async_config_entry_first_refresh()
 
+    if not entry.unique_id:
+        try:
+            serial = await envoy_reader.get_full_serial_number()
+        except httpx.HTTPError:
+            pass
+        else:
+            hass.config_entries.async_update_entry(entry, unique_id=serial)
+
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         COORDINATOR: coordinator,
         NAME: name,
     }
 
-    for platform in PLATFORMS:
-        hass.async_create_task(
-            hass.config_entries.async_forward_entry_setup(entry, platform)
-        )
+    hass.config_entries.async_setup_platforms(entry, PLATFORMS)
 
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    unload_ok = all(
-        await asyncio.gather(
-            *[
-                hass.config_entries.async_forward_entry_unload(entry, platform)
-                for platform in PLATFORMS
-            ]
-        )
-    )
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
-
     return unload_ok

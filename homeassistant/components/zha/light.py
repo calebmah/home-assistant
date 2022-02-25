@@ -23,22 +23,27 @@ from homeassistant.components.light import (
     ATTR_HS_COLOR,
     ATTR_MAX_MIREDS,
     ATTR_MIN_MIREDS,
-    ATTR_WHITE_VALUE,
     SUPPORT_BRIGHTNESS,
     SUPPORT_COLOR,
     SUPPORT_COLOR_TEMP,
     SUPPORT_EFFECT,
     SUPPORT_FLASH,
     SUPPORT_TRANSITION,
-    SUPPORT_WHITE_VALUE,
 )
-from homeassistant.const import ATTR_SUPPORTED_FEATURES, STATE_ON, STATE_UNAVAILABLE
-from homeassistant.core import State, callback
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import (
+    ATTR_SUPPORTED_FEATURES,
+    STATE_ON,
+    STATE_UNAVAILABLE,
+    Platform,
+)
+from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.dispatcher import (
     async_dispatcher_connect,
     async_dispatcher_send,
 )
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 import homeassistant.util.color as color_util
 
@@ -49,13 +54,13 @@ from .core.const import (
     CHANNEL_ON_OFF,
     CONF_DEFAULT_LIGHT_TRANSITION,
     DATA_ZHA,
-    DATA_ZHA_DISPATCHERS,
     EFFECT_BLINK,
     EFFECT_BREATHE,
     EFFECT_DEFAULT_VARIANT,
     SIGNAL_ADD_ENTITIES,
     SIGNAL_ATTR_UPDATED,
     SIGNAL_SET_LEVEL,
+    ZHA_OPTIONS,
 )
 from .core.helpers import LogMixin, async_get_zha_config_value
 from .core.registries import ZHA_ENTITIES
@@ -78,8 +83,8 @@ UPDATE_COLORLOOP_HUE = 0x8
 FLASH_EFFECTS = {light.FLASH_SHORT: EFFECT_BLINK, light.FLASH_LONG: EFFECT_BREATHE}
 
 UNSUPPORTED_ATTRIBUTE = 0x86
-STRICT_MATCH = functools.partial(ZHA_ENTITIES.strict_match, light.DOMAIN)
-GROUP_MATCH = functools.partial(ZHA_ENTITIES.group_match, light.DOMAIN)
+STRICT_MATCH = functools.partial(ZHA_ENTITIES.strict_match, Platform.LIGHT)
+GROUP_MATCH = functools.partial(ZHA_ENTITIES.group_match, Platform.LIGHT)
 PARALLEL_UPDATES = 0
 SIGNAL_LIGHT_GROUP_STATE_CHANGED = "zha_light_group_state_changed"
 
@@ -90,7 +95,6 @@ SUPPORT_GROUP_LIGHT = (
     | SUPPORT_FLASH
     | SUPPORT_COLOR
     | SUPPORT_TRANSITION
-    | SUPPORT_WHITE_VALUE
 )
 
 
@@ -102,9 +106,13 @@ class LightColorMode(enum.IntEnum):
     COLOR_TEMP = 0x02
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
     """Set up the Zigbee Home Automation light from config entry."""
-    entities_to_create = hass.data[DATA_ZHA][light.DOMAIN]
+    entities_to_create = hass.data[DATA_ZHA][Platform.LIGHT]
 
     unsub = async_dispatcher_connect(
         hass,
@@ -113,7 +121,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             discovery.async_add_entities, async_add_entities, entities_to_create
         ),
     )
-    hass.data[DATA_ZHA][DATA_ZHA_DISPATCHERS].append(unsub)
+    config_entry.async_on_unload(unsub)
 
 
 class BaseLight(LogMixin, light.LightEntity):
@@ -131,7 +139,6 @@ class BaseLight(LogMixin, light.LightEntity):
         self._color_temp: int | None = None
         self._min_mireds: int | None = 153
         self._max_mireds: int | None = 500
-        self._white_value: int | None = None
         self._effect_list: list[str] | None = None
         self._effect: str | None = None
         self._supported_features: int = 0
@@ -170,6 +177,7 @@ class BaseLight(LogMixin, light.LightEntity):
         """Return the warmest color_temp that this light supports."""
         return self._max_mireds
 
+    @callback
     def set_level(self, value):
         """Set the brightness of this light between 0..254.
 
@@ -398,7 +406,10 @@ class Light(BaseLight, ZhaEntity):
             self._effect_list = effect_list
 
         self._default_transition = async_get_zha_config_value(
-            zha_device.gateway.config_entry, CONF_DEFAULT_LIGHT_TRANSITION, 0
+            zha_device.gateway.config_entry,
+            ZHA_OPTIONS,
+            CONF_DEFAULT_LIGHT_TRANSITION,
+            0,
         )
 
     @callback
@@ -419,7 +430,7 @@ class Light(BaseLight, ZhaEntity):
             self.async_accept_signal(
                 self._level_channel, SIGNAL_SET_LEVEL, self.set_level
             )
-        refresh_interval = random.randint(*[x * 60 for x in self._REFRESH_INTERVAL])
+        refresh_interval = random.randint(*(x * 60 for x in self._REFRESH_INTERVAL))
         self._cancel_refresh_handle = async_track_time_interval(
             self.hass, self._refresh, timedelta(seconds=refresh_interval)
         )
@@ -480,8 +491,7 @@ class Light(BaseLight, ZhaEntity):
                 attributes, from_cache=False
             )
 
-            color_mode = results.get("color_mode")
-            if color_mode is not None:
+            if (color_mode := results.get("color_mode")) is not None:
                 if color_mode == LightColorMode.COLOR_TEMP:
                     color_temp = results.get("color_temperature")
                     if color_temp is not None and color_mode:
@@ -522,7 +532,7 @@ class Light(BaseLight, ZhaEntity):
 @STRICT_MATCH(
     channel_names=CHANNEL_ON_OFF,
     aux_channels={CHANNEL_COLOR, CHANNEL_LEVEL},
-    manufacturers="Philips",
+    manufacturers={"Philips", "Signify Netherlands B.V."},
 )
 class HueLight(Light):
     """Representation of a HUE light which does not report attributes."""
@@ -557,7 +567,10 @@ class LightGroup(BaseLight, ZhaGroupEntity):
         self._identify_channel = group.endpoint[Identify.cluster_id]
         self._debounced_member_refresh = None
         self._default_transition = async_get_zha_config_value(
-            zha_device.gateway.config_entry, CONF_DEFAULT_LIGHT_TRANSITION, 0
+            zha_device.gateway.config_entry,
+            ZHA_OPTIONS,
+            CONF_DEFAULT_LIGHT_TRANSITION,
+            0,
         )
 
     async def async_added_to_hass(self):
@@ -597,8 +610,6 @@ class LightGroup(BaseLight, ZhaGroupEntity):
         self._hs_color = helpers.reduce_attribute(
             on_states, ATTR_HS_COLOR, reduce=helpers.mean_tuple
         )
-
-        self._white_value = helpers.reduce_attribute(on_states, ATTR_WHITE_VALUE)
 
         self._color_temp = helpers.reduce_attribute(on_states, ATTR_COLOR_TEMP)
         self._min_mireds = helpers.reduce_attribute(

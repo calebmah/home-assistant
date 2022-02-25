@@ -16,6 +16,8 @@ def get_update_manager(device):
     update_managers = {
         "A1": BroadlinkA1UpdateManager,
         "BG1": BroadlinkBG1UpdateManager,
+        "LB1": BroadlinkLB1UpdateManager,
+        "LB2": BroadlinkLB1UpdateManager,
         "MP1": BroadlinkMP1UpdateManager,
         "RM4MINI": BroadlinkRMUpdateManager,
         "RM4PRO": BroadlinkRMUpdateManager,
@@ -117,10 +119,24 @@ class BroadlinkRMUpdateManager(BroadlinkUpdateManager):
         device = self.device
 
         if hasattr(device.api, "check_sensors"):
-            return await device.async_request(device.api.check_sensors)
+            data = await device.async_request(device.api.check_sensors)
+            return self.normalize(data, self.coordinator.data)
 
         await device.async_request(device.api.update)
         return {}
+
+    @staticmethod
+    def normalize(data, previous_data):
+        """Fix firmware issue.
+
+        See https://github.com/home-assistant/core/issues/42100.
+        """
+        if data["temperature"] == -7:
+            if previous_data is None or previous_data["temperature"] is None:
+                data["temperature"] = None
+            elif abs(previous_data["temperature"] - data["temperature"]) > 3:
+                data["temperature"] = previous_data["temperature"]
+        return data
 
 
 class BroadlinkSP1UpdateManager(BroadlinkUpdateManager):
@@ -157,6 +173,14 @@ class BroadlinkBG1UpdateManager(BroadlinkUpdateManager):
 
 class BroadlinkSP4UpdateManager(BroadlinkUpdateManager):
     """Manages updates for Broadlink SP4 devices."""
+
+    async def async_fetch_data(self):
+        """Fetch data from the device."""
+        return await self.device.async_request(self.device.api.get_state)
+
+
+class BroadlinkLB1UpdateManager(BroadlinkUpdateManager):
+    """Manages updates for Broadlink LB1 devices."""
 
     async def async_fetch_data(self):
         """Fetch data from the device."""

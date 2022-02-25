@@ -1,8 +1,9 @@
 """Common code for tests."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from enum import Enum
-from typing import Callable, NamedTuple
+from typing import NamedTuple
 from unittest.mock import MagicMock
 
 import pyvera as pv
@@ -65,7 +66,7 @@ def new_simple_controller_config(
     setup_callback: SetupCallback = None,
     legacy_entity_unique_id=False,
 ) -> ControllerConfig:
-    """Create simple contorller config."""
+    """Create simple controller config."""
     return ControllerConfig(
         config=config or {CONF_CONTROLLER: "http://127.0.0.1:123"},
         options=options,

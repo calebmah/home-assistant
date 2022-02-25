@@ -1,4 +1,6 @@
 """Each ElkM1 area will be created as a separate alarm_control_panel."""
+from __future__ import annotations
+
 from elkm1_lib.const import AlarmState, ArmedStatus, ArmLevel, ArmUpState
 from elkm1_lib.util import username
 import voluptuous as vol
@@ -13,8 +15,8 @@ from homeassistant.components.alarm_control_panel.const import (
     SUPPORT_ALARM_ARM_HOME,
     SUPPORT_ALARM_ARM_NIGHT,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
-    ATTR_ENTITY_ID,
     STATE_ALARM_ARMED_AWAY,
     STATE_ALARM_ARMED_HOME,
     STATE_ALARM_ARMED_NIGHT,
@@ -23,8 +25,10 @@ from homeassistant.const import (
     STATE_ALARM_PENDING,
     STATE_ALARM_TRIGGERED,
 )
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_platform
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from . import ElkAttachedEntity, create_elk_entities
@@ -36,18 +40,15 @@ from .const import (
     ELK_USER_CODE_SERVICE_SCHEMA,
 )
 
-DISPLAY_MESSAGE_SERVICE_SCHEMA = vol.Schema(
-    {
-        vol.Optional(ATTR_ENTITY_ID, default=[]): cv.entity_ids,
-        vol.Optional("clear", default=2): vol.All(vol.Coerce(int), vol.In([0, 1, 2])),
-        vol.Optional("beep", default=False): cv.boolean,
-        vol.Optional("timeout", default=0): vol.All(
-            vol.Coerce(int), vol.Range(min=0, max=65535)
-        ),
-        vol.Optional("line1", default=""): cv.string,
-        vol.Optional("line2", default=""): cv.string,
-    }
-)
+DISPLAY_MESSAGE_SERVICE_SCHEMA = {
+    vol.Optional("clear", default=2): vol.All(vol.Coerce(int), vol.In([0, 1, 2])),
+    vol.Optional("beep", default=False): cv.boolean,
+    vol.Optional("timeout", default=0): vol.All(
+        vol.Coerce(int), vol.Range(min=0, max=65535)
+    ),
+    vol.Optional("line1", default=""): cv.string,
+    vol.Optional("line2", default=""): cv.string,
+}
 
 SERVICE_ALARM_DISPLAY_MESSAGE = "alarm_display_message"
 SERVICE_ALARM_ARM_VACATION = "alarm_arm_vacation"
@@ -57,15 +58,19 @@ SERVICE_ALARM_BYPASS = "alarm_bypass"
 SERVICE_ALARM_CLEAR_BYPASS = "alarm_clear_bypass"
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
     """Set up the ElkM1 alarm platform."""
     elk_data = hass.data[DOMAIN][config_entry.entry_id]
     elk = elk_data["elk"]
-    entities = []
+    entities: list[ElkArea] = []
     create_elk_entities(elk_data, elk.areas, "area", ElkArea, entities)
     async_add_entities(entities, True)
 
-    platform = entity_platform.current_platform.get()
+    platform = entity_platform.async_get_current_platform()
 
     platform.async_register_entity_service(
         SERVICE_ALARM_ARM_VACATION,
@@ -121,8 +126,7 @@ class ElkArea(ElkAttachedEntity, AlarmControlPanelEntity, RestoreEntity):
         self._element.add_callback(self._watch_area)
 
         # We do not get changed_by back from resync.
-        last_state = await self.async_get_last_state()
-        if not last_state:
+        if not (last_state := await self.async_get_last_state()):
             return
 
         if ATTR_CHANGED_BY_KEYPAD in last_state.attributes:
@@ -145,8 +149,7 @@ class ElkArea(ElkAttachedEntity, AlarmControlPanelEntity, RestoreEntity):
             self.async_write_ha_state()
 
     def _watch_area(self, area, changeset):
-        last_log = changeset.get("last_log")
-        if not last_log:
+        if not (last_log := changeset.get("last_log")):
             return
         # user_number only set for arm/disarm logs
         if not last_log.get("user_number"):

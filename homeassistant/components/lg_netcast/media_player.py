@@ -1,4 +1,6 @@
 """Support for LG TV running on NetCast 3 or 4."""
+from __future__ import annotations
+
 from datetime import datetime, timedelta
 
 from pylgnetcast import LgNetCastClient, LgNetCastError
@@ -12,11 +14,13 @@ from homeassistant.components.media_player.const import (
     SUPPORT_NEXT_TRACK,
     SUPPORT_PAUSE,
     SUPPORT_PLAY,
+    SUPPORT_PLAY_MEDIA,
     SUPPORT_PREVIOUS_TRACK,
     SUPPORT_SELECT_SOURCE,
     SUPPORT_TURN_OFF,
     SUPPORT_TURN_ON,
     SUPPORT_VOLUME_MUTE,
+    SUPPORT_VOLUME_SET,
     SUPPORT_VOLUME_STEP,
 )
 from homeassistant.const import (
@@ -27,8 +31,13 @@ from homeassistant.const import (
     STATE_PAUSED,
     STATE_PLAYING,
 )
+from homeassistant.core import HomeAssistant
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.script import Script
+from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+
+from .const import DOMAIN
 
 DEFAULT_NAME = "LG TV Remote"
 
@@ -40,12 +49,14 @@ MIN_TIME_BETWEEN_SCANS = timedelta(seconds=10)
 SUPPORT_LGTV = (
     SUPPORT_PAUSE
     | SUPPORT_VOLUME_STEP
+    | SUPPORT_VOLUME_SET
     | SUPPORT_VOLUME_MUTE
     | SUPPORT_PREVIOUS_TRACK
     | SUPPORT_NEXT_TRACK
     | SUPPORT_TURN_OFF
     | SUPPORT_SELECT_SOURCE
     | SUPPORT_PLAY
+    | SUPPORT_PLAY_MEDIA
 )
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
@@ -58,17 +69,21 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 )
 
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
+def setup_platform(
+    hass: HomeAssistant,
+    config: ConfigType,
+    add_entities: AddEntitiesCallback,
+    discovery_info: DiscoveryInfoType | None = None,
+) -> None:
     """Set up the LG TV platform."""
 
     host = config.get(CONF_HOST)
     access_token = config.get(CONF_ACCESS_TOKEN)
-    name = config.get(CONF_NAME)
+    name = config[CONF_NAME]
     on_action = config.get(CONF_ON_ACTION)
 
     client = LgNetCastClient(host, access_token)
-    domain = __name__.split(".")[-2]
-    on_action_script = Script(hass, on_action, name, domain) if on_action else None
+    on_action_script = Script(hass, on_action, name, DOMAIN) if on_action else None
 
     add_entities([LgTVDevice(client, name, on_action_script)], True)
 
@@ -85,6 +100,7 @@ class LgTVDevice(MediaPlayerEntity):
         # Assume that the TV is in Play mode
         self._playing = True
         self._volume = 0
+        self._channel_id = None
         self._channel_name = ""
         self._program_name = ""
         self._state = None
@@ -107,17 +123,17 @@ class LgTVDevice(MediaPlayerEntity):
         try:
             with self._client as client:
                 self._state = STATE_PLAYING
-                volume_info = client.query_data("volume_info")
-                if volume_info:
-                    volume_info = volume_info[0]
-                    self._volume = float(volume_info.find("level").text)
-                    self._muted = volume_info.find("mute").text == "true"
+
+                self.__update_volume()
 
                 channel_info = client.query_data("cur_channel")
                 if channel_info:
                     channel_info = channel_info[0]
+                    channel_id = channel_info.find("major")
                     self._channel_name = channel_info.find("chname").text
                     self._program_name = channel_info.find("progName").text
+                    if channel_id is not None:
+                        self._channel_id = int(channel_id.text)
                     if self._channel_name is None:
                         self._channel_name = channel_info.find("inputSourceName").text
                     if self._program_name is None:
@@ -133,7 +149,8 @@ class LgTVDevice(MediaPlayerEntity):
                     self._sources = dict(zip(channel_names, channel_list))
                     # sort source names by the major channel number
                     source_tuples = [
-                        (k, self._sources[k].find("major").text) for k in self._sources
+                        (k, source.find("major").text)
+                        for k, source in self._sources.items()
                     ]
                     sorted_sources = sorted(
                         source_tuples, key=lambda channel: int(channel[1])
@@ -141,6 +158,13 @@ class LgTVDevice(MediaPlayerEntity):
                     self._source_names = [n for n, k in sorted_sources]
         except (LgNetCastError, RequestException):
             self._state = STATE_OFF
+
+    def __update_volume(self):
+        volume_info = self._client.get_volume()
+        if volume_info:
+            (volume, muted) = volume_info
+            self._volume = volume
+            self._muted = muted
 
     @property
     def name(self):
@@ -171,6 +195,11 @@ class LgTVDevice(MediaPlayerEntity):
     def source_list(self):
         """List of available input sources."""
         return self._source_names
+
+    @property
+    def media_content_id(self):
+        """Content id of current playing media."""
+        return self._channel_id
 
     @property
     def media_content_type(self):
@@ -218,6 +247,10 @@ class LgTVDevice(MediaPlayerEntity):
         """Volume down media player."""
         self.send_command(25)
 
+    def set_volume_level(self, volume):
+        """Set volume level, range 0..1."""
+        self._client.set_volume(float(volume * 100))
+
     def mute_volume(self, mute):
         """Send mute command."""
         self.send_command(26)
@@ -252,3 +285,16 @@ class LgTVDevice(MediaPlayerEntity):
     def media_previous_track(self):
         """Send the previous track command."""
         self.send_command(37)
+
+    def play_media(self, media_type, media_id, **kwargs):
+        """Tune to channel."""
+        if media_type != MEDIA_TYPE_CHANNEL:
+            raise ValueError(f"Invalid media type: {media_type}")
+
+        for name, channel in self._sources.items():
+            channel_id = channel.find("major")
+            if channel_id is not None and int(channel_id.text) == int(media_id):
+                self.select_source(name)
+                return
+
+        raise ValueError(f"Invalid media id: {media_id}")

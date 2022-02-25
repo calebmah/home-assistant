@@ -4,7 +4,9 @@ import logging
 from pycoolmasternet_async import CoolMasterNet
 
 from homeassistant.components.climate import SCAN_INTERVAL
-from homeassistant.const import CONF_HOST, CONF_PORT
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_HOST, CONF_PORT, Platform
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -12,8 +14,10 @@ from .const import DATA_COORDINATOR, DATA_INFO, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+PLATFORMS = [Platform.CLIMATE]
 
-async def async_setup_entry(hass, entry):
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Coolmaster from a config entry."""
     host = entry.data[CONF_HOST]
     port = entry.data[CONF_PORT]
@@ -22,7 +26,7 @@ async def async_setup_entry(hass, entry):
         info = await coolmaster.info()
         if not info:
             raise ConfigEntryNotReady
-    except (OSError, ConnectionRefusedError, TimeoutError) as error:
+    except OSError as error:
         raise ConfigEntryNotReady() from error
     coordinator = CoolmasterDataUpdateCoordinator(hass, coolmaster)
     hass.data.setdefault(DOMAIN, {})
@@ -31,20 +35,16 @@ async def async_setup_entry(hass, entry):
         DATA_INFO: info,
         DATA_COORDINATOR: coordinator,
     }
-    hass.async_create_task(
-        hass.config_entries.async_forward_entry_setup(entry, "climate")
-    )
+    hass.config_entries.async_setup_platforms(entry, PLATFORMS)
 
     return True
 
 
-async def async_unload_entry(hass, entry):
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a Coolmaster config entry."""
-    unload_ok = await hass.config_entries.async_forward_entry_unload(entry, "climate")
-
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
-
     return unload_ok
 
 
@@ -66,5 +66,5 @@ class CoolmasterDataUpdateCoordinator(DataUpdateCoordinator):
         """Fetch data from Coolmaster."""
         try:
             return await self._coolmaster.status()
-        except (OSError, ConnectionRefusedError, TimeoutError) as error:
+        except OSError as error:
             raise UpdateFailed from error

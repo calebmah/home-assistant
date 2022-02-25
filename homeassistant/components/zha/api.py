@@ -9,11 +9,12 @@ from typing import Any
 import voluptuous as vol
 from zigpy.config.validators import cv_boolean
 from zigpy.types.named import EUI64
+from zigpy.zcl.clusters.security import IasAce
 import zigpy.zdo.types as zdo_types
 
 from homeassistant.components import websocket_api
 from homeassistant.const import ATTR_COMMAND, ATTR_NAME
-from homeassistant.core import callback
+from homeassistant.core import ServiceCall, callback
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
@@ -54,10 +55,13 @@ from .core.const import (
     WARNING_DEVICE_SQUAWK_MODE_ARMED,
     WARNING_DEVICE_STROBE_HIGH,
     WARNING_DEVICE_STROBE_YES,
+    ZHA_ALARM_OPTIONS,
+    ZHA_CHANNEL_MSG,
     ZHA_CONFIG_SCHEMAS,
 )
 from .core.group import GroupMember
 from .core.helpers import (
+    async_cluster_exists,
     async_is_bindable_target,
     convert_install_code,
     get_matched_clusters,
@@ -359,6 +363,7 @@ def cv_group_member(value: Any) -> GroupMember:
     {
         vol.Required(TYPE): "zha/group/add",
         vol.Required(GROUP_NAME): cv.string,
+        vol.Optional(GROUP_ID): cv.positive_int,
         vol.Optional(ATTR_MEMBERS): vol.All(cv.ensure_list, [cv_group_member]),
     }
 )
@@ -367,7 +372,8 @@ async def websocket_add_group(hass, connection, msg):
     zha_gateway = hass.data[DATA_ZHA][DATA_ZHA_GATEWAY]
     group_name = msg[GROUP_NAME]
     members = msg.get(ATTR_MEMBERS)
-    group = await zha_gateway.async_create_zigpy_group(group_name, members)
+    group_id = msg.get(GROUP_ID)
+    group = await zha_gateway.async_create_zigpy_group(group_name, members, group_id)
     connection.send_result(msg[ID], group.group_info)
 
 
@@ -468,34 +474,21 @@ async def websocket_reconfigure_node(hass, connection, msg):
     zha_gateway: ZhaGatewayType = hass.data[DATA_ZHA][DATA_ZHA_GATEWAY]
     ieee = msg[ATTR_IEEE]
     device: ZhaDeviceType = zha_gateway.get_device(ieee)
-    ieee_str = str(device.ieee)
-    nwk_str = device.nwk.__repr__()
-
-    class DeviceLogFilterer(logging.Filter):
-        """Log filterer that limits messages to the specified device."""
-
-        def filter(self, record):
-            message = record.getMessage()
-            return nwk_str in message or ieee_str in message
-
-    filterer = DeviceLogFilterer()
 
     async def forward_messages(data):
         """Forward events to websocket."""
         connection.send_message(websocket_api.event_message(msg["id"], data))
 
     remove_dispatcher_function = async_dispatcher_connect(
-        hass, "zha_gateway_message", forward_messages
+        hass, ZHA_CHANNEL_MSG, forward_messages
     )
 
     @callback
     def async_cleanup() -> None:
-        """Remove signal listener and turn off debug mode."""
-        zha_gateway.async_disable_debug_mode(filterer=filterer)
+        """Remove signal listener."""
         remove_dispatcher_function()
 
     connection.subscriptions[msg["id"]] = async_cleanup
-    zha_gateway.async_enable_debug_mode(filterer=filterer)
 
     _LOGGER.debug("Reconfiguring node with ieee_address: %s", ieee)
     hass.async_create_task(device.async_configure())
@@ -906,6 +899,10 @@ async def websocket_get_configuration(hass, connection, msg):
 
     data = {"schemas": {}, "data": {}}
     for section, schema in ZHA_CONFIG_SCHEMAS.items():
+        if section == ZHA_ALARM_OPTIONS and not async_cluster_exists(
+            hass, IasAce.cluster_id
+        ):
+            continue
         data["schemas"][section] = voluptuous_serialize.convert(
             schema, custom_serializer=custom_serializer
         )
@@ -948,7 +945,7 @@ def async_load_api(hass):
     zha_gateway = hass.data[DATA_ZHA][DATA_ZHA_GATEWAY]
     application_controller = zha_gateway.application_controller
 
-    async def permit(service):
+    async def permit(service: ServiceCall) -> None:
         """Allow devices to join this network."""
         duration = service.data[ATTR_DURATION]
         ieee = service.data.get(ATTR_IEEE)
@@ -979,7 +976,7 @@ def async_load_api(hass):
         DOMAIN, SERVICE_PERMIT, permit, schema=SERVICE_SCHEMAS[SERVICE_PERMIT]
     )
 
-    async def remove(service):
+    async def remove(service: ServiceCall) -> None:
         """Remove a node from the network."""
         ieee = service.data[ATTR_IEEE]
         zha_gateway: ZhaGatewayType = hass.data[DATA_ZHA][DATA_ZHA_GATEWAY]
@@ -997,7 +994,7 @@ def async_load_api(hass):
         DOMAIN, SERVICE_REMOVE, remove, schema=SERVICE_SCHEMAS[IEEE_SERVICE]
     )
 
-    async def set_zigbee_cluster_attributes(service):
+    async def set_zigbee_cluster_attributes(service: ServiceCall) -> None:
         """Set zigbee attribute for cluster on zha entity."""
         ieee = service.data.get(ATTR_IEEE)
         endpoint_id = service.data.get(ATTR_ENDPOINT_ID)
@@ -1044,7 +1041,7 @@ def async_load_api(hass):
         schema=SERVICE_SCHEMAS[SERVICE_SET_ZIGBEE_CLUSTER_ATTRIBUTE],
     )
 
-    async def issue_zigbee_cluster_command(service):
+    async def issue_zigbee_cluster_command(service: ServiceCall) -> None:
         """Issue command on zigbee cluster on zha entity."""
         ieee = service.data.get(ATTR_IEEE)
         endpoint_id = service.data.get(ATTR_ENDPOINT_ID)
@@ -1095,7 +1092,7 @@ def async_load_api(hass):
         schema=SERVICE_SCHEMAS[SERVICE_ISSUE_ZIGBEE_CLUSTER_COMMAND],
     )
 
-    async def issue_zigbee_group_command(service):
+    async def issue_zigbee_group_command(service: ServiceCall) -> None:
         """Issue command on zigbee cluster on a zigbee group."""
         group_id = service.data.get(ATTR_GROUP)
         cluster_id = service.data.get(ATTR_CLUSTER_ID)
@@ -1141,17 +1138,15 @@ def async_load_api(hass):
         }
         return cluster_channels.get(CHANNEL_IAS_WD)
 
-    async def warning_device_squawk(service):
+    async def warning_device_squawk(service: ServiceCall) -> None:
         """Issue the squawk command for an IAS warning device."""
         ieee = service.data[ATTR_IEEE]
         mode = service.data.get(ATTR_WARNING_DEVICE_MODE)
         strobe = service.data.get(ATTR_WARNING_DEVICE_STROBE)
         level = service.data.get(ATTR_LEVEL)
 
-        zha_device = zha_gateway.get_device(ieee)
-        if zha_device is not None:
-            channel = _get_ias_wd_channel(zha_device)
-            if channel:
+        if (zha_device := zha_gateway.get_device(ieee)) is not None:
+            if channel := _get_ias_wd_channel(zha_device):
                 await channel.issue_squawk(mode, strobe, level)
             else:
                 _LOGGER.error(
@@ -1182,7 +1177,7 @@ def async_load_api(hass):
         schema=SERVICE_SCHEMAS[SERVICE_WARNING_DEVICE_SQUAWK],
     )
 
-    async def warning_device_warn(service):
+    async def warning_device_warn(service: ServiceCall) -> None:
         """Issue the warning command for an IAS warning device."""
         ieee = service.data[ATTR_IEEE]
         mode = service.data.get(ATTR_WARNING_DEVICE_MODE)
@@ -1192,10 +1187,8 @@ def async_load_api(hass):
         duty_mode = service.data.get(ATTR_WARNING_DEVICE_STROBE_DUTY_CYCLE)
         intensity = service.data.get(ATTR_WARNING_DEVICE_STROBE_INTENSITY)
 
-        zha_device = zha_gateway.get_device(ieee)
-        if zha_device is not None:
-            channel = _get_ias_wd_channel(zha_device)
-            if channel:
+        if (zha_device := zha_gateway.get_device(ieee)) is not None:
+            if channel := _get_ias_wd_channel(zha_device):
                 await channel.issue_start_warning(
                     mode, strobe, level, duration, duty_mode, intensity
                 )

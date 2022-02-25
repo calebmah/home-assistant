@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict
+from typing import Any
 
 import zigpy.zcl.clusters.closures
 
@@ -32,7 +32,7 @@ from .. import (
     typing as zha_typing,
 )
 
-ChannelsDict = Dict[str, zha_typing.ChannelType]
+ChannelsDict = dict[str, zha_typing.ChannelType]
 
 
 class Channels:
@@ -130,6 +130,13 @@ class Channels:
         await self.zdo_channel.async_configure()
         self.zdo_channel.debug("'async_configure' stage succeeded")
         await asyncio.gather(*(pool.async_configure() for pool in self.pools))
+        async_dispatcher_send(
+            self.zha_device.hass,
+            const.ZHA_CHANNEL_MSG,
+            {
+                const.ATTR_TYPE: const.ZHA_CHANNEL_CFG_DONE,
+            },
+        )
 
     @callback
     def async_new_entity(
@@ -169,7 +176,7 @@ class Channels:
 class ChannelPool:
     """All channels of an endpoint."""
 
-    def __init__(self, channels: Channels, ep_id: int):
+    def __init__(self, channels: Channels, ep_id: int) -> None:
         """Initialize instance."""
         self._all_channels: ChannelsDict = {}
         self._channels: Channels = channels

@@ -1,14 +1,17 @@
-"""The tests for MQTT device triggers."""
+"""The tests for Tasmota device triggers."""
 import copy
 import json
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from hatasmota.switch import TasmotaSwitchTriggerConfig
 import pytest
 
 import homeassistant.components.automation as automation
+from homeassistant.components.device_automation import DeviceAutomationType
+from homeassistant.components.tasmota import _LOGGER
 from homeassistant.components.tasmota.const import DEFAULT_PREFIX, DOMAIN
-from homeassistant.components.tasmota.device_trigger import async_attach_trigger
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.trigger import async_initialize_triggers
 from homeassistant.setup import async_setup_component
 
 from .test_common import DEFAULT_CONFIG
@@ -33,7 +36,9 @@ async def test_get_triggers_btn(hass, device_reg, entity_reg, mqtt_mock, setup_t
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
     expected_triggers = [
         {
             "platform": "device",
@@ -52,7 +57,9 @@ async def test_get_triggers_btn(hass, device_reg, entity_reg, mqtt_mock, setup_t
             "subtype": "button_2",
         },
     ]
-    triggers = await async_get_device_automations(hass, "trigger", device_entry.id)
+    triggers = await async_get_device_automations(
+        hass, DeviceAutomationType.TRIGGER, device_entry.id
+    )
     assert_lists_same(triggers, expected_triggers)
 
 
@@ -65,7 +72,9 @@ async def test_get_triggers_swc(hass, device_reg, entity_reg, mqtt_mock, setup_t
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
     expected_triggers = [
         {
             "platform": "device",
@@ -76,7 +85,9 @@ async def test_get_triggers_swc(hass, device_reg, entity_reg, mqtt_mock, setup_t
             "subtype": "switch_1",
         },
     ]
-    triggers = await async_get_device_automations(hass, "trigger", device_entry.id)
+    triggers = await async_get_device_automations(
+        hass, DeviceAutomationType.TRIGGER, device_entry.id
+    )
     assert_lists_same(triggers, expected_triggers)
 
 
@@ -92,7 +103,9 @@ async def test_get_unknown_triggers(
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     assert await async_setup_component(
         hass,
@@ -117,7 +130,9 @@ async def test_get_unknown_triggers(
         },
     )
 
-    triggers = await async_get_device_automations(hass, "trigger", device_entry.id)
+    triggers = await async_get_device_automations(
+        hass, DeviceAutomationType.TRIGGER, device_entry.id
+    )
     assert_lists_same(triggers, [])
 
 
@@ -133,8 +148,12 @@ async def test_get_non_existing_triggers(
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config1))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
-    triggers = await async_get_device_automations(hass, "trigger", device_entry.id)
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
+    triggers = await async_get_device_automations(
+        hass, DeviceAutomationType.TRIGGER, device_entry.id
+    )
     assert_lists_same(triggers, [])
 
 
@@ -157,8 +176,12 @@ async def test_discover_bad_triggers(
         )
         await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
-    triggers = await async_get_device_automations(hass, "trigger", device_entry.id)
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
+    triggers = await async_get_device_automations(
+        hass, DeviceAutomationType.TRIGGER, device_entry.id
+    )
     assert_lists_same(triggers, [])
 
     # Trigger an exception when the entity is discovered
@@ -189,8 +212,12 @@ async def test_discover_bad_triggers(
         )
         await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
-    triggers = await async_get_device_automations(hass, "trigger", device_entry.id)
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
+    triggers = await async_get_device_automations(
+        hass, DeviceAutomationType.TRIGGER, device_entry.id
+    )
     assert_lists_same(triggers, [])
 
     # Rediscover without exception
@@ -207,7 +234,9 @@ async def test_discover_bad_triggers(
             "subtype": "switch_1",
         },
     ]
-    triggers = await async_get_device_automations(hass, "trigger", device_entry.id)
+    triggers = await async_get_device_automations(
+        hass, DeviceAutomationType.TRIGGER, device_entry.id
+    )
     assert_lists_same(triggers, expected_triggers)
 
 
@@ -231,7 +260,9 @@ async def test_update_remove_triggers(
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config1))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     expected_triggers1 = [
         {
@@ -254,7 +285,9 @@ async def test_update_remove_triggers(
     expected_triggers2 = copy.deepcopy(expected_triggers1)
     expected_triggers2[1]["type"] = "button_double_press"
 
-    triggers = await async_get_device_automations(hass, "trigger", device_entry.id)
+    triggers = await async_get_device_automations(
+        hass, DeviceAutomationType.TRIGGER, device_entry.id
+    )
     for expected in expected_triggers1:
         assert expected in triggers
 
@@ -262,7 +295,9 @@ async def test_update_remove_triggers(
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config2))
     await hass.async_block_till_done()
 
-    triggers = await async_get_device_automations(hass, "trigger", device_entry.id)
+    triggers = await async_get_device_automations(
+        hass, DeviceAutomationType.TRIGGER, device_entry.id
+    )
     for expected in expected_triggers2:
         assert expected in triggers
 
@@ -270,7 +305,9 @@ async def test_update_remove_triggers(
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config3))
     await hass.async_block_till_done()
 
-    triggers = await async_get_device_automations(hass, "trigger", device_entry.id)
+    triggers = await async_get_device_automations(
+        hass, DeviceAutomationType.TRIGGER, device_entry.id
+    )
     assert triggers == []
 
 
@@ -287,7 +324,9 @@ async def test_if_fires_on_mqtt_message_btn(
 
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config))
     await hass.async_block_till_done()
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     assert await async_setup_component(
         hass,
@@ -357,7 +396,9 @@ async def test_if_fires_on_mqtt_message_swc(
 
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config))
     await hass.async_block_till_done()
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     assert await async_setup_component(
         hass,
@@ -453,7 +494,9 @@ async def test_if_fires_on_mqtt_message_late_discover(
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config1))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     assert await async_setup_component(
         hass,
@@ -527,7 +570,9 @@ async def test_if_fires_on_mqtt_message_after_update(
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config1))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     assert await async_setup_component(
         hass,
@@ -604,7 +649,9 @@ async def test_no_resubscribe_same_topic(hass, device_reg, mqtt_mock, setup_tasm
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     assert await async_setup_component(
         hass,
@@ -650,7 +697,9 @@ async def test_not_fires_on_mqtt_message_after_remove_by_mqtt(
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     assert await async_setup_component(
         hass,
@@ -719,7 +768,9 @@ async def test_not_fires_on_mqtt_message_after_remove_from_registry(
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     assert await async_setup_component(
         hass,
@@ -774,25 +825,31 @@ async def test_attach_remove(hass, device_reg, mqtt_mock, setup_tasmota):
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     calls = []
 
     def callback(trigger, context):
         calls.append(trigger["trigger"]["description"])
 
-    remove = await async_attach_trigger(
+    remove = await async_initialize_triggers(
         hass,
-        {
-            "platform": "device",
-            "domain": DOMAIN,
-            "device_id": device_entry.id,
-            "discovery_id": "00000049A3BC_switch_1_TOGGLE",
-            "type": "button_short_press",
-            "subtype": "switch_1",
-        },
+        [
+            {
+                "platform": "device",
+                "domain": DOMAIN,
+                "device_id": device_entry.id,
+                "discovery_id": "00000049A3BC_switch_1_TOGGLE",
+                "type": "button_short_press",
+                "subtype": "switch_1",
+            },
+        ],
         callback,
-        None,
+        DOMAIN,
+        "mock-name",
+        _LOGGER.log,
     )
 
     # Fake short press.
@@ -829,25 +886,31 @@ async def test_attach_remove_late(hass, device_reg, mqtt_mock, setup_tasmota):
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config1))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     calls = []
 
     def callback(trigger, context):
         calls.append(trigger["trigger"]["description"])
 
-    remove = await async_attach_trigger(
+    remove = await async_initialize_triggers(
         hass,
-        {
-            "platform": "device",
-            "domain": DOMAIN,
-            "device_id": device_entry.id,
-            "discovery_id": "00000049A3BC_switch_1_TOGGLE",
-            "type": "button_short_press",
-            "subtype": "switch_1",
-        },
+        [
+            {
+                "platform": "device",
+                "domain": DOMAIN,
+                "device_id": device_entry.id,
+                "discovery_id": "00000049A3BC_switch_1_TOGGLE",
+                "type": "button_short_press",
+                "subtype": "switch_1",
+            },
+        ],
         callback,
-        None,
+        DOMAIN,
+        "mock-name",
+        _LOGGER.log,
     )
 
     # Fake short press.
@@ -894,25 +957,31 @@ async def test_attach_remove_late2(hass, device_reg, mqtt_mock, setup_tasmota):
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config1))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     calls = []
 
     def callback(trigger, context):
         calls.append(trigger["trigger"]["description"])
 
-    remove = await async_attach_trigger(
+    remove = await async_initialize_triggers(
         hass,
-        {
-            "platform": "device",
-            "domain": DOMAIN,
-            "device_id": device_entry.id,
-            "discovery_id": "00000049A3BC_switch_1_TOGGLE",
-            "type": "button_short_press",
-            "subtype": "switch_1",
-        },
+        [
+            {
+                "platform": "device",
+                "domain": DOMAIN,
+                "device_id": device_entry.id,
+                "discovery_id": "00000049A3BC_switch_1_TOGGLE",
+                "type": "button_short_press",
+                "subtype": "switch_1",
+            },
+        ],
         callback,
-        None,
+        DOMAIN,
+        "mock-name",
+        _LOGGER.log,
     )
 
     # Remove the trigger
@@ -940,20 +1009,26 @@ async def test_attach_remove_unknown1(hass, device_reg, mqtt_mock, setup_tasmota
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config1))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
-    remove = await async_attach_trigger(
+    remove = await async_initialize_triggers(
         hass,
-        {
-            "platform": "device",
-            "domain": DOMAIN,
-            "device_id": device_entry.id,
-            "discovery_id": "00000049A3BC_switch_1_TOGGLE",
-            "type": "button_short_press",
-            "subtype": "switch_1",
-        },
-        None,
-        None,
+        [
+            {
+                "platform": "device",
+                "domain": DOMAIN,
+                "device_id": device_entry.id,
+                "discovery_id": "00000049A3BC_switch_1_TOGGLE",
+                "type": "button_short_press",
+                "subtype": "switch_1",
+            },
+        ],
+        Mock(),
+        DOMAIN,
+        "mock-name",
+        _LOGGER.log,
     )
 
     # Remove the trigger
@@ -982,20 +1057,26 @@ async def test_attach_unknown_remove_device_from_registry(
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config1))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
-    await async_attach_trigger(
+    await async_initialize_triggers(
         hass,
-        {
-            "platform": "device",
-            "domain": DOMAIN,
-            "device_id": device_entry.id,
-            "discovery_id": "00000049A3BC_switch_1_TOGGLE",
-            "type": "button_short_press",
-            "subtype": "switch_1",
-        },
-        None,
-        None,
+        [
+            {
+                "platform": "device",
+                "domain": DOMAIN,
+                "device_id": device_entry.id,
+                "discovery_id": "00000049A3BC_switch_1_TOGGLE",
+                "type": "button_short_press",
+                "subtype": "switch_1",
+            },
+        ],
+        Mock(),
+        DOMAIN,
+        "mock-name",
+        _LOGGER.log,
     )
 
     # Remove the device
@@ -1015,25 +1096,31 @@ async def test_attach_remove_config_entry(hass, device_reg, mqtt_mock, setup_tas
     async_fire_mqtt_message(hass, f"{DEFAULT_PREFIX}/{mac}/config", json.dumps(config))
     await hass.async_block_till_done()
 
-    device_entry = device_reg.async_get_device(set(), {("mac", mac)})
+    device_entry = device_reg.async_get_device(
+        set(), {(dr.CONNECTION_NETWORK_MAC, mac)}
+    )
 
     calls = []
 
     def callback(trigger, context):
         calls.append(trigger["trigger"]["description"])
 
-    await async_attach_trigger(
+    await async_initialize_triggers(
         hass,
-        {
-            "platform": "device",
-            "domain": DOMAIN,
-            "device_id": device_entry.id,
-            "discovery_id": "00000049A3BC_switch_1_TOGGLE",
-            "type": "button_short_press",
-            "subtype": "switch_1",
-        },
+        [
+            {
+                "platform": "device",
+                "domain": DOMAIN,
+                "device_id": device_entry.id,
+                "discovery_id": "00000049A3BC_switch_1_TOGGLE",
+                "type": "button_short_press",
+                "subtype": "switch_1",
+            },
+        ],
         callback,
-        None,
+        DOMAIN,
+        "mock-name",
+        _LOGGER.log,
     )
 
     # Fake short press.

@@ -1,6 +1,5 @@
 """Test deCONZ component setup process."""
 
-import asyncio
 from unittest.mock import patch
 
 from homeassistant.components.deconz import (
@@ -13,6 +12,7 @@ from homeassistant.components.deconz.const import (
     CONF_GROUP_ID_BASE,
     DOMAIN as DECONZ_DOMAIN,
 )
+from homeassistant.components.deconz.errors import AuthenticationRequired, CannotConnect
 from homeassistant.components.light import DOMAIN as LIGHT_DOMAIN
 from homeassistant.const import CONF_API_KEY, CONF_HOST, CONF_PORT
 from homeassistant.helpers import entity_registry as er
@@ -42,27 +42,36 @@ async def setup_entry(hass, entry):
         assert await async_setup_entry(hass, entry) is True
 
 
-async def test_setup_entry_fails(hass):
-    """Test setup entry fails if deCONZ is not available."""
-    with patch("pydeconz.DeconzSession.initialize", side_effect=Exception):
-        await setup_deconz_integration(hass)
-    assert not hass.data[DECONZ_DOMAIN]
-
-
-async def test_setup_entry_no_available_bridge(hass):
-    """Test setup entry fails if deCONZ is not available."""
-    with patch("pydeconz.DeconzSession.initialize", side_effect=asyncio.TimeoutError):
-        await setup_deconz_integration(hass)
-    assert not hass.data[DECONZ_DOMAIN]
-
-
 async def test_setup_entry_successful(hass, aioclient_mock):
     """Test setup entry is successful."""
     config_entry = await setup_deconz_integration(hass, aioclient_mock)
 
     assert hass.data[DECONZ_DOMAIN]
-    assert config_entry.unique_id in hass.data[DECONZ_DOMAIN]
-    assert hass.data[DECONZ_DOMAIN][config_entry.unique_id].master
+    assert config_entry.entry_id in hass.data[DECONZ_DOMAIN]
+    assert hass.data[DECONZ_DOMAIN][config_entry.entry_id].master
+
+
+async def test_setup_entry_fails_config_entry_not_ready(hass):
+    """Failed authentication trigger a reauthentication flow."""
+    with patch(
+        "homeassistant.components.deconz.get_deconz_session",
+        side_effect=CannotConnect,
+    ):
+        await setup_deconz_integration(hass)
+
+    assert hass.data[DECONZ_DOMAIN] == {}
+
+
+async def test_setup_entry_fails_trigger_reauth_flow(hass):
+    """Failed authentication trigger a reauthentication flow."""
+    with patch(
+        "homeassistant.components.deconz.get_deconz_session",
+        side_effect=AuthenticationRequired,
+    ), patch.object(hass.config_entries.flow, "async_init") as mock_flow_init:
+        await setup_deconz_integration(hass)
+        mock_flow_init.assert_called_once()
+
+    assert hass.data[DECONZ_DOMAIN] == {}
 
 
 async def test_setup_entry_multiple_gateways(hass, aioclient_mock):
@@ -80,8 +89,8 @@ async def test_setup_entry_multiple_gateways(hass, aioclient_mock):
         )
 
     assert len(hass.data[DECONZ_DOMAIN]) == 2
-    assert hass.data[DECONZ_DOMAIN][config_entry.unique_id].master
-    assert not hass.data[DECONZ_DOMAIN][config_entry2.unique_id].master
+    assert hass.data[DECONZ_DOMAIN][config_entry.entry_id].master
+    assert not hass.data[DECONZ_DOMAIN][config_entry2.entry_id].master
 
 
 async def test_unload_entry(hass, aioclient_mock):
@@ -112,7 +121,7 @@ async def test_unload_entry_multiple_gateways(hass, aioclient_mock):
     assert await async_unload_entry(hass, config_entry)
 
     assert len(hass.data[DECONZ_DOMAIN]) == 1
-    assert hass.data[DECONZ_DOMAIN][config_entry2.unique_id].master
+    assert hass.data[DECONZ_DOMAIN][config_entry2.entry_id].master
 
 
 async def test_update_group_unique_id(hass):

@@ -7,7 +7,9 @@ from alarmdecoder.util import NoDeviceError
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.components.binary_sensor import DEVICE_CLASSES
+from homeassistant.components.binary_sensor import (
+    DEVICE_CLASSES_SCHEMA as BINARY_SENSOR_DEVICE_CLASSES_SCHEMA,
+)
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_PROTOCOL
 from homeassistant.core import callback
 
@@ -49,7 +51,6 @@ class AlarmDecoderFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a AlarmDecoder config flow."""
 
     VERSION = 1
-    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_PUSH
 
     def __init__(self):
         """Initialize AlarmDecoder ConfigFlow."""
@@ -141,7 +142,7 @@ class AlarmDecoderFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 class AlarmDecoderOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle AlarmDecoder options."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry):
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize AlarmDecoder options flow."""
         self.arm_options = config_entry.options.get(OPTIONS_ARM, DEFAULT_ARM_OPTIONS)
         self.zone_options = config_entry.options.get(
@@ -249,7 +250,7 @@ class AlarmDecoderOptionsFlowHandler(config_entries.OptionsFlow):
                         default=existing_zone_settings.get(
                             CONF_ZONE_TYPE, DEFAULT_ZONE_TYPE
                         ),
-                    ): vol.In(DEVICE_CLASSES),
+                    ): BINARY_SENSOR_DEVICE_CLASSES_SCHEMA,
                     vol.Optional(
                         CONF_ZONE_RFID,
                         description={
@@ -300,7 +301,7 @@ def _validate_zone_input(zone_input):
         errors["base"] = "relay_inclusive"
 
     # The following keys must be int
-    for key in [CONF_ZONE_NUMBER, CONF_ZONE_LOOP, CONF_RELAY_ADDR, CONF_RELAY_CHAN]:
+    for key in (CONF_ZONE_NUMBER, CONF_ZONE_LOOP, CONF_RELAY_ADDR, CONF_RELAY_CHAN):
         if key in zone_input:
             try:
                 int(zone_input[key])
@@ -329,7 +330,7 @@ def _fix_input_types(zone_input):
     strings and then convert them to ints.
     """
 
-    for key in [CONF_ZONE_LOOP, CONF_RELAY_ADDR, CONF_RELAY_CHAN]:
+    for key in (CONF_ZONE_LOOP, CONF_RELAY_ADDR, CONF_RELAY_CHAN):
         if key in zone_input:
             zone_input[key] = int(zone_input[key])
 

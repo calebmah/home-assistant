@@ -5,8 +5,10 @@ from aioflo.location import SLEEP_MINUTE_OPTIONS, SYSTEM_MODE_HOME, SYSTEM_REVER
 import voluptuous as vol
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.core import callback
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_platform
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN as FLO_DOMAIN
 from .device import FloDeviceDataUpdateCoordinator
@@ -20,7 +22,11 @@ SERVICE_SET_HOME_MODE = "set_home_mode"
 SERVICE_RUN_HEALTH_TEST = "run_health_test"
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
     """Set up the Flo switches from config entry."""
     devices: list[FloDeviceDataUpdateCoordinator] = hass.data[FLO_DOMAIN][
         config_entry.entry_id
@@ -31,7 +37,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
             entities.append(FloSwitch(device))
     async_add_entities(entities)
 
-    platform = entity_platform.current_platform.get()
+    platform = entity_platform.async_get_current_platform()
 
     platform.async_register_entity_service(
         SERVICE_SET_AWAY_MODE, {}, "async_set_mode_away"
@@ -57,7 +63,7 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 class FloSwitch(FloEntity, SwitchEntity):
     """Switch class for the Flo by Moen valve."""
 
-    def __init__(self, device: FloDeviceDataUpdateCoordinator):
+    def __init__(self, device: FloDeviceDataUpdateCoordinator) -> None:
         """Initialize the Flo switch."""
         super().__init__("shutoff_valve", "Shutoff Valve", device)
         self._state = self._device.last_known_valve_state == "open"

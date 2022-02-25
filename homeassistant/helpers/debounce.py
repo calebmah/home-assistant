@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from logging import Logger
-from typing import Any, Callable
+from typing import Any
 
 from homeassistant.core import HassJob, HomeAssistant, callback
 
@@ -20,7 +20,7 @@ class Debouncer:
         cooldown: float,
         immediate: bool,
         function: Callable[..., Awaitable[Any]] | None = None,
-    ):
+    ) -> None:
         """Initialize debounce.
 
         immediate: indicate if the function needs to be called right away and
@@ -97,7 +97,7 @@ class Debouncer:
         async with self._execute_lock:
             # Abort if timer got set while we're waiting for the lock.
             if self._timer_task:
-                return  # type: ignore
+                return  # type: ignore[unreachable]
 
             try:
                 task = self.hass.async_run_hass_job(self._job)

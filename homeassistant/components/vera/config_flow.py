@@ -1,6 +1,7 @@
 """Config flow for Vera."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 import re
 from typing import Any
@@ -41,7 +42,7 @@ def new_options(lights: list[int], exclude: list[int]) -> dict:
     return {CONF_LIGHTS: lights, CONF_EXCLUDE: exclude}
 
 
-def options_schema(options: dict = None) -> dict:
+def options_schema(options: Mapping[str, Any] = None) -> dict:
     """Return options schema."""
     options = options or {}
     return {
@@ -67,7 +68,7 @@ def options_data(user_input: dict) -> dict:
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Options for the component."""
 
-    def __init__(self, config_entry: ConfigEntry):
+    def __init__(self, config_entry: ConfigEntry) -> None:
         """Init object."""
         self.config_entry = config_entry
 

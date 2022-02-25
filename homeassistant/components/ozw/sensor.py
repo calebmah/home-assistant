@@ -1,22 +1,18 @@
 """Representation of Z-Wave sensors."""
-
 import logging
 
 from openzwavemqtt.const import CommandClass, ValueType
 
 from homeassistant.components.sensor import (
-    DEVICE_CLASS_BATTERY,
-    DEVICE_CLASS_HUMIDITY,
-    DEVICE_CLASS_ILLUMINANCE,
-    DEVICE_CLASS_POWER,
-    DEVICE_CLASS_PRESSURE,
-    DEVICE_CLASS_TEMPERATURE,
     DOMAIN as SENSOR_DOMAIN,
+    SensorDeviceClass,
     SensorEntity,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import TEMP_CELSIUS, TEMP_FAHRENHEIT
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DATA_UNSUBSCRIBE, DOMAIN
 from .entity import ZWaveDeviceEntity
@@ -24,7 +20,11 @@ from .entity import ZWaveDeviceEntity
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
     """Set up Z-Wave sensor from config entry."""
 
     @callback
@@ -65,34 +65,34 @@ class ZwaveSensorBase(ZWaveDeviceEntity, SensorEntity):
     def device_class(self):
         """Return the device class of the sensor."""
         if self.values.primary.command_class == CommandClass.BATTERY:
-            return DEVICE_CLASS_BATTERY
+            return SensorDeviceClass.BATTERY
         if self.values.primary.command_class == CommandClass.METER:
-            return DEVICE_CLASS_POWER
+            return SensorDeviceClass.POWER
         if "Temperature" in self.values.primary.label:
-            return DEVICE_CLASS_TEMPERATURE
+            return SensorDeviceClass.TEMPERATURE
         if "Illuminance" in self.values.primary.label:
-            return DEVICE_CLASS_ILLUMINANCE
+            return SensorDeviceClass.ILLUMINANCE
         if "Humidity" in self.values.primary.label:
-            return DEVICE_CLASS_HUMIDITY
+            return SensorDeviceClass.HUMIDITY
         if "Power" in self.values.primary.label:
-            return DEVICE_CLASS_POWER
+            return SensorDeviceClass.POWER
         if "Energy" in self.values.primary.label:
-            return DEVICE_CLASS_POWER
+            return SensorDeviceClass.POWER
         if "Electric" in self.values.primary.label:
-            return DEVICE_CLASS_POWER
+            return SensorDeviceClass.POWER
         if "Pressure" in self.values.primary.label:
-            return DEVICE_CLASS_PRESSURE
+            return SensorDeviceClass.PRESSURE
         return None
 
     @property
     def entity_registry_enabled_default(self) -> bool:
         """Return if the entity should be enabled when first added to the entity registry."""
         # We hide some of the more advanced sensors by default to not overwhelm users
-        if self.values.primary.command_class in [
+        if self.values.primary.command_class in (
             CommandClass.BASIC,
             CommandClass.INDICATOR,
             CommandClass.NOTIFICATION,
-        ]:
+        ):
             return False
         return True
 
@@ -106,12 +106,12 @@ class ZWaveStringSensor(ZwaveSensorBase):
     """Representation of a Z-Wave sensor."""
 
     @property
-    def state(self):
+    def native_value(self):
         """Return state of the sensor."""
         return self.values.primary.value
 
     @property
-    def unit_of_measurement(self):
+    def native_unit_of_measurement(self):
         """Return unit of measurement the value is expressed in."""
         return self.values.primary.units
 
@@ -125,12 +125,12 @@ class ZWaveNumericSensor(ZwaveSensorBase):
     """Representation of a Z-Wave sensor."""
 
     @property
-    def state(self):
+    def native_value(self):
         """Return state of the sensor."""
         return round(self.values.primary.value, 2)
 
     @property
-    def unit_of_measurement(self):
+    def native_unit_of_measurement(self):
         """Return unit of measurement the value is expressed in."""
         if self.values.primary.units == "C":
             return TEMP_CELSIUS
@@ -144,7 +144,7 @@ class ZWaveListSensor(ZwaveSensorBase):
     """Representation of a Z-Wave list sensor."""
 
     @property
-    def state(self):
+    def native_value(self):
         """Return the state of the sensor."""
         # We use the id as value for backwards compatibility
         return self.values.primary.value["Selected_id"]

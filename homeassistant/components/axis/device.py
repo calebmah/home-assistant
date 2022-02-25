@@ -12,7 +12,8 @@ from axis.streammanager import SIGNAL_PLAYING, STATE_STOPPED
 
 from homeassistant.components import mqtt
 from homeassistant.components.mqtt import DOMAIN as MQTT_DOMAIN
-from homeassistant.components.mqtt.models import Message
+from homeassistant.components.mqtt.models import ReceiveMessage
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CONF_HOST,
     CONF_NAME,
@@ -23,6 +24,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import CONNECTION_NETWORK_MAC
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.httpx_client import get_async_client
@@ -57,8 +59,6 @@ class AxisNetworkDevice:
         self.api = None
         self.fw_version = None
         self.product_type = None
-
-        self.listeners = []
 
     @property
     def host(self):
@@ -157,7 +157,9 @@ class AxisNetworkDevice:
             async_dispatcher_send(self.hass, self.signal_new_event, event_id)
 
     @staticmethod
-    async def async_new_address_callback(hass, entry):
+    async def async_new_address_callback(
+        hass: HomeAssistant, entry: ConfigEntry
+    ) -> None:
         """Handle signals of device getting new address.
 
         Called when config entry is updated.
@@ -170,9 +172,10 @@ class AxisNetworkDevice:
 
     async def async_update_device_registry(self):
         """Update device registry."""
-        device_registry = await self.hass.helpers.device_registry.async_get_registry()
+        device_registry = dr.async_get(self.hass)
         device_registry.async_get_or_create(
             config_entry_id=self.config_entry.entry_id,
+            configuration_url=self.api.config.url,
             connections={(CONNECTION_NETWORK_MAC, self.unique_id)},
             identifiers={(AXIS_DOMAIN, self.unique_id)},
             manufacturer=ATTR_MANUFACTURER,
@@ -190,14 +193,14 @@ class AxisNetworkDevice:
             status = {}
 
         if status.get("data", {}).get("status", {}).get("state") == "active":
-            self.listeners.append(
+            self.config_entry.async_on_unload(
                 await mqtt.async_subscribe(
                     hass, f"{self.api.vapix.serial_number}/#", self.mqtt_message
                 )
             )
 
     @callback
-    def mqtt_message(self, message: Message) -> None:
+    def mqtt_message(self, message: ReceiveMessage) -> None:
         """Receive Axis MQTT message."""
         self.disconnect_from_stream()
 
@@ -228,12 +231,12 @@ class AxisNetworkDevice:
 
         async def start_platforms():
             await asyncio.gather(
-                *[
+                *(
                     self.hass.config_entries.async_forward_entry_setup(
                         self.config_entry, platform
                     )
                     for platform in PLATFORMS
-                ]
+                )
             )
             if self.option_events:
                 self.api.stream.connection_status_callback.append(
@@ -266,23 +269,9 @@ class AxisNetworkDevice:
         """Reset this device to default state."""
         self.disconnect_from_stream()
 
-        unload_ok = all(
-            await asyncio.gather(
-                *[
-                    self.hass.config_entries.async_forward_entry_unload(
-                        self.config_entry, platform
-                    )
-                    for platform in PLATFORMS
-                ]
-            )
+        return await self.hass.config_entries.async_unload_platforms(
+            self.config_entry, PLATFORMS
         )
-        if not unload_ok:
-            return False
-
-        for unsubscribe_listener in self.listeners:
-            unsubscribe_listener()
-
-        return True
 
 
 async def get_device(hass, host, port, username, password):
@@ -294,7 +283,7 @@ async def get_device(hass, host, port, username, password):
     )
 
     try:
-        with async_timeout.timeout(30):
+        async with async_timeout.timeout(30):
             await device.vapix.initialize()
 
         return device

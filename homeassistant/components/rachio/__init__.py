@@ -1,13 +1,13 @@
 """Integration with the Rachio Iro sprinkler system controller."""
-import asyncio
 import logging
 import secrets
 
 from rachiopy import Rachio
 from requests.exceptions import ConnectTimeout
 
+from homeassistant.components import cloud
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_API_KEY
+from homeassistant.const import CONF_API_KEY, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
@@ -21,35 +21,26 @@ from .webhooks import (
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["switch", "binary_sensor"]
+PLATFORMS = [Platform.SWITCH, Platform.BINARY_SENSOR]
 
-CONFIG_SCHEMA = cv.deprecated(DOMAIN)
+CONFIG_SCHEMA = cv.removed(DOMAIN, raise_if_present=False)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    unload_ok = all(
-        await asyncio.gather(
-            *[
-                hass.config_entries.async_forward_entry_unload(entry, platform)
-                for platform in PLATFORMS
-            ]
-        )
-    )
-
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
-
     return unload_ok
 
 
-async def async_remove_entry(hass, entry):
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove a rachio config entry."""
     if CONF_CLOUDHOOK_URL in entry.data:
-        await hass.components.cloud.async_delete_cloudhook(entry.data[CONF_WEBHOOK_ID])
+        await cloud.async_delete_cloudhook(hass, entry.data[CONF_WEBHOOK_ID])
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the Rachio config entry."""
 
     config = entry.data
@@ -67,9 +58,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     # Get the URL of this server
     rachio.webhook_auth = secrets.token_hex()
-    webhook_id, webhook_url = await async_get_or_create_registered_webhook_id_and_url(
-        hass, entry
-    )
+    try:
+        (
+            webhook_id,
+            webhook_url,
+        ) = await async_get_or_create_registered_webhook_id_and_url(hass, entry)
+    except cloud.CloudNotConnected as exc:
+        # User has an active cloud subscription, but the connection to the cloud is down
+        raise ConfigEntryNotReady from exc
     rachio.webhook_url = webhook_url
 
     person = RachioPerson(rachio, entry)
@@ -96,9 +92,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     hass.data[DOMAIN][entry.entry_id] = person
     async_register_webhook(hass, webhook_id, entry.entry_id)
 
-    for platform in PLATFORMS:
-        hass.async_create_task(
-            hass.config_entries.async_forward_entry_setup(entry, platform)
-        )
+    hass.config_entries.async_setup_platforms(entry, PLATFORMS)
 
     return True

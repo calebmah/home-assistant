@@ -11,6 +11,7 @@ from homeassistant.components.denonavr.config_flow import (
     CONF_SERIAL_NUMBER,
     CONF_SHOW_ALL_SOURCES,
     CONF_TYPE,
+    CONF_UPDATE_AUDYSSEY,
     CONF_ZONE2,
     CONF_ZONE3,
     DOMAIN,
@@ -28,6 +29,7 @@ TEST_IGNORED_MODEL = "HEOS 7"
 TEST_RECEIVER_TYPE = "avr-x"
 TEST_SERIALNUMBER = "123456789"
 TEST_MANUFACTURER = "Denon"
+TEST_UPDATE_AUDYSSEY = False
 TEST_SSDP_LOCATION = f"http://{TEST_HOST}/"
 TEST_UNIQUE_ID = f"{TEST_MODEL}-{TEST_SERIALNUMBER}"
 TEST_DISCOVER_1_RECEIVER = [{CONF_HOST: TEST_HOST}]
@@ -298,12 +300,16 @@ async def test_config_flow_ssdp(hass):
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_SSDP},
-        data={
-            ssdp.ATTR_UPNP_MANUFACTURER: TEST_MANUFACTURER,
-            ssdp.ATTR_UPNP_MODEL_NAME: TEST_MODEL,
-            ssdp.ATTR_UPNP_SERIAL: TEST_SERIALNUMBER,
-            ssdp.ATTR_SSDP_LOCATION: TEST_SSDP_LOCATION,
-        },
+        data=ssdp.SsdpServiceInfo(
+            ssdp_usn="mock_usn",
+            ssdp_st="mock_st",
+            ssdp_location=TEST_SSDP_LOCATION,
+            upnp={
+                ssdp.ATTR_UPNP_MANUFACTURER: TEST_MANUFACTURER,
+                ssdp.ATTR_UPNP_MODEL_NAME: TEST_MODEL,
+                ssdp.ATTR_UPNP_SERIAL: TEST_SERIALNUMBER,
+            },
+        ),
     )
 
     assert result["type"] == "form"
@@ -334,12 +340,16 @@ async def test_config_flow_ssdp_not_denon(hass):
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_SSDP},
-        data={
-            ssdp.ATTR_UPNP_MANUFACTURER: "NotSupported",
-            ssdp.ATTR_UPNP_MODEL_NAME: TEST_MODEL,
-            ssdp.ATTR_UPNP_SERIAL: TEST_SERIALNUMBER,
-            ssdp.ATTR_SSDP_LOCATION: TEST_SSDP_LOCATION,
-        },
+        data=ssdp.SsdpServiceInfo(
+            ssdp_usn="mock_usn",
+            ssdp_st="mock_st",
+            ssdp_location=TEST_SSDP_LOCATION,
+            upnp={
+                ssdp.ATTR_UPNP_MANUFACTURER: "NotSupported",
+                ssdp.ATTR_UPNP_MODEL_NAME: TEST_MODEL,
+                ssdp.ATTR_UPNP_SERIAL: TEST_SERIALNUMBER,
+            },
+        ),
     )
 
     assert result["type"] == "abort"
@@ -355,10 +365,14 @@ async def test_config_flow_ssdp_missing_info(hass):
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_SSDP},
-        data={
-            ssdp.ATTR_UPNP_MANUFACTURER: TEST_MANUFACTURER,
-            ssdp.ATTR_SSDP_LOCATION: TEST_SSDP_LOCATION,
-        },
+        data=ssdp.SsdpServiceInfo(
+            ssdp_usn="mock_usn",
+            ssdp_st="mock_st",
+            ssdp_location=TEST_SSDP_LOCATION,
+            upnp={
+                ssdp.ATTR_UPNP_MANUFACTURER: TEST_MANUFACTURER,
+            },
+        ),
     )
 
     assert result["type"] == "abort"
@@ -374,12 +388,16 @@ async def test_config_flow_ssdp_ignored_model(hass):
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": config_entries.SOURCE_SSDP},
-        data={
-            ssdp.ATTR_UPNP_MANUFACTURER: TEST_MANUFACTURER,
-            ssdp.ATTR_UPNP_MODEL_NAME: TEST_IGNORED_MODEL,
-            ssdp.ATTR_UPNP_SERIAL: TEST_SERIALNUMBER,
-            ssdp.ATTR_SSDP_LOCATION: TEST_SSDP_LOCATION,
-        },
+        data=ssdp.SsdpServiceInfo(
+            ssdp_usn="mock_usn",
+            ssdp_st="mock_st",
+            ssdp_location=TEST_SSDP_LOCATION,
+            upnp={
+                ssdp.ATTR_UPNP_MANUFACTURER: TEST_MANUFACTURER,
+                ssdp.ATTR_UPNP_MODEL_NAME: TEST_IGNORED_MODEL,
+                ssdp.ATTR_UPNP_SERIAL: TEST_SERIALNUMBER,
+            },
+        ),
     )
 
     assert result["type"] == "abort"
@@ -397,6 +415,7 @@ async def test_options_flow(hass):
             CONF_TYPE: TEST_RECEIVER_TYPE,
             CONF_MANUFACTURER: TEST_MANUFACTURER,
             CONF_SERIAL_NUMBER: TEST_SERIALNUMBER,
+            CONF_UPDATE_AUDYSSEY: TEST_UPDATE_AUDYSSEY,
         },
         title=TEST_NAME,
     )
@@ -420,6 +439,7 @@ async def test_options_flow(hass):
         CONF_SHOW_ALL_SOURCES: True,
         CONF_ZONE2: True,
         CONF_ZONE3: True,
+        CONF_UPDATE_AUDYSSEY: False,
     }
 
 

@@ -2,20 +2,22 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Callable, cast
+from typing import cast
 
 import pyvera as veraApi
 
-from homeassistant.components.sensor import (
-    DOMAIN as PLATFORM_DOMAIN,
-    ENTITY_ID_FORMAT,
-    SensorEntity,
-)
+from homeassistant.components.sensor import ENTITY_ID_FORMAT, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import LIGHT_LUX, PERCENTAGE, TEMP_CELSIUS, TEMP_FAHRENHEIT
+from homeassistant.const import (
+    LIGHT_LUX,
+    PERCENTAGE,
+    TEMP_CELSIUS,
+    TEMP_FAHRENHEIT,
+    Platform,
+)
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import Entity
-from homeassistant.util import convert
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.typing import StateType
 
 from . import VeraDevice
 from .common import ControllerData, get_controller_data
@@ -26,14 +28,14 @@ SCAN_INTERVAL = timedelta(seconds=5)
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: Callable[[list[Entity], bool], None],
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the sensor config entry."""
     controller_data = get_controller_data(hass, entry)
     async_add_entities(
         [
             VeraSensor(device, controller_data)
-            for device in controller_data.devices.get(PLATFORM_DOMAIN)
+            for device in controller_data.devices[Platform.SENSOR]
         ],
         True,
     )
@@ -44,21 +46,21 @@ class VeraSensor(VeraDevice[veraApi.VeraSensor], SensorEntity):
 
     def __init__(
         self, vera_device: veraApi.VeraSensor, controller_data: ControllerData
-    ):
+    ) -> None:
         """Initialize the sensor."""
-        self.current_value = None
-        self._temperature_units = None
+        self.current_value: StateType = None
+        self._temperature_units: str | None = None
         self.last_changed_time = None
         VeraDevice.__init__(self, vera_device, controller_data)
         self.entity_id = ENTITY_ID_FORMAT.format(self.vera_id)
 
     @property
-    def state(self) -> str:
+    def native_value(self) -> StateType:
         """Return the name of the sensor."""
         return self.current_value
 
     @property
-    def unit_of_measurement(self) -> str | None:
+    def native_unit_of_measurement(self) -> str | None:
         """Return the unit of measurement of this entity, if any."""
 
         if self.vera_device.category == veraApi.CATEGORY_TEMPERATURE_SENSOR:
@@ -71,6 +73,7 @@ class VeraSensor(VeraDevice[veraApi.VeraSensor], SensorEntity):
             return PERCENTAGE
         if self.vera_device.category == veraApi.CATEGORY_POWER_METER:
             return "watts"
+        return None
 
     def update(self) -> None:
         """Update the state."""
@@ -101,8 +104,7 @@ class VeraSensor(VeraDevice[veraApi.VeraSensor], SensorEntity):
                 self.current_value = value
             self.last_changed_time = time
         elif self.vera_device.category == veraApi.CATEGORY_POWER_METER:
-            power = convert(self.vera_device.power, float, 0)
-            self.current_value = int(round(power, 0))
+            self.current_value = self.vera_device.power
         elif self.vera_device.is_trippable:
             tripped = self.vera_device.is_tripped
             self.current_value = "Tripped" if tripped else "Not Tripped"

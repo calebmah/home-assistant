@@ -9,7 +9,6 @@ from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
-import pytz
 import voluptuous as vol
 
 from homeassistant.const import (
@@ -40,16 +39,27 @@ from homeassistant.exceptions import (
     ServiceNotFound,
 )
 import homeassistant.util.dt as dt_util
+from homeassistant.util.read_only_dict import ReadOnlyDict
 from homeassistant.util.unit_system import METRIC_SYSTEM
 
 from tests.common import async_capture_events, async_mock_service
 
-PST = pytz.timezone("America/Los_Angeles")
+PST = dt_util.get_time_zone("America/Los_Angeles")
 
 
 def test_split_entity_id():
     """Test split_entity_id."""
-    assert ha.split_entity_id("domain.object_id") == ["domain", "object_id"]
+    assert ha.split_entity_id("domain.object_id") == ("domain", "object_id")
+    with pytest.raises(ValueError):
+        ha.split_entity_id("")
+    with pytest.raises(ValueError):
+        ha.split_entity_id(".")
+    with pytest.raises(ValueError):
+        ha.split_entity_id("just_domain")
+    with pytest.raises(ValueError):
+        ha.split_entity_id("empty_object_id.")
+    with pytest.raises(ValueError):
+        ha.split_entity_id(".empty_domain")
 
 
 def test_async_add_hass_job_schedule_callback():
@@ -234,6 +244,29 @@ async def test_async_add_job_pending_tasks_coro(hass):
     assert len(call_count) == 2
 
 
+async def test_async_create_task_pending_tasks_coro(hass):
+    """Add a coro to pending tasks."""
+    call_count = []
+
+    async def test_coro():
+        """Test Coro."""
+        call_count.append("call")
+
+    for _ in range(2):
+        hass.create_task(test_coro())
+
+    async def wait_finish_callback():
+        """Wait until all stuff is scheduled."""
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    await wait_finish_callback()
+
+    assert len(hass._pending_tasks) == 2
+    await hass.async_block_till_done()
+    assert len(call_count) == 2
+
+
 async def test_async_add_job_pending_tasks_executor(hass):
     """Run an executor in pending tasks."""
     call_count = []
@@ -293,9 +326,9 @@ def test_event_eq():
     now = dt_util.utcnow()
     data = {"some": "attr"}
     context = ha.Context()
-    event1, event2 = [
+    event1, event2 = (
         ha.Event("some_type", data, time_fired=now, context=context) for _ in range(2)
-    ]
+    )
 
     assert event1 == event2
 
@@ -355,10 +388,14 @@ def test_state_as_dict():
         "last_updated": last_time.isoformat(),
         "state": "on",
     }
-    assert state.as_dict() == expected
+    as_dict_1 = state.as_dict()
+    assert isinstance(as_dict_1, ReadOnlyDict)
+    assert isinstance(as_dict_1["attributes"], ReadOnlyDict)
+    assert isinstance(as_dict_1["context"], ReadOnlyDict)
+    assert as_dict_1 == expected
     # 2nd time to verify cache
     assert state.as_dict() == expected
-    assert state.as_dict() is state.as_dict()
+    assert state.as_dict() is as_dict_1
 
 
 async def test_eventbus_add_remove_listener(hass):
@@ -877,10 +914,10 @@ def test_config_defaults():
     assert config.longitude == 0
     assert config.elevation == 0
     assert config.location_name == "Home"
-    assert config.time_zone == dt_util.UTC
+    assert config.time_zone == "UTC"
     assert config.internal_url is None
     assert config.external_url is None
-    assert config.config_source == "default"
+    assert config.config_source is ha.ConfigSource.DEFAULT
     assert config.skip_pip is False
     assert config.components == set()
     assert config.api is None
@@ -890,6 +927,7 @@ def test_config_defaults():
     assert config.media_dirs == {}
     assert config.safe_mode is False
     assert config.legacy_templates is False
+    assert config.currency == "EUR"
 
 
 def test_config_path_with_file():
@@ -925,11 +963,12 @@ def test_config_as_dict():
         "allowlist_external_dirs": set(),
         "allowlist_external_urls": set(),
         "version": __version__,
-        "config_source": "default",
+        "config_source": ha.ConfigSource.DEFAULT,
         "safe_mode": False,
         "state": "RUNNING",
         "external_url": None,
         "internal_url": None,
+        "currency": "EUR",
     }
 
     assert expected == config.as_dict()
@@ -1348,6 +1387,33 @@ async def test_additional_data_in_core_config(hass, hass_storage):
     }
     await config.async_load()
     assert config.location_name == "Test Name"
+
+
+async def test_incorrect_internal_external_url(hass, hass_storage, caplog):
+    """Test that we warn when detecting invalid internal/extenral url."""
+    config = ha.Config(hass)
+
+    hass_storage[ha.CORE_STORAGE_KEY] = {
+        "version": 1,
+        "data": {
+            "internal_url": None,
+            "external_url": None,
+        },
+    }
+    await config.async_load()
+    assert "Invalid external_url set" not in caplog.text
+    assert "Invalid internal_url set" not in caplog.text
+
+    hass_storage[ha.CORE_STORAGE_KEY] = {
+        "version": 1,
+        "data": {
+            "internal_url": "https://community.home-assistant.io/profile",
+            "external_url": "https://www.home-assistant.io/blue",
+        },
+    }
+    await config.async_load()
+    assert "Invalid external_url set" in caplog.text
+    assert "Invalid internal_url set" in caplog.text
 
 
 async def test_start_events(hass):

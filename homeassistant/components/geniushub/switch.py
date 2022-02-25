@@ -1,12 +1,15 @@
 """Support for Genius Hub switch/outlet devices."""
+from __future__ import annotations
+
 from datetime import timedelta
 
 import voluptuous as vol
 
-from homeassistant.components.switch import DEVICE_CLASS_OUTLET, SwitchEntity
-from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv, entity_platform
-from homeassistant.helpers.typing import ConfigType, HomeAssistantType
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
 from . import ATTR_DURATION, DOMAIN, GeniusZone
 
@@ -14,19 +17,19 @@ GH_ON_OFF_ZONE = "on / off"
 
 SVC_SET_SWITCH_OVERRIDE = "set_switch_override"
 
-SET_SWITCH_OVERRIDE_SCHEMA = vol.Schema(
-    {
-        vol.Required(ATTR_ENTITY_ID): cv.entity_id,
-        vol.Optional(ATTR_DURATION): vol.All(
-            cv.time_period,
-            vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
-        ),
-    }
-)
+SET_SWITCH_OVERRIDE_SCHEMA = {
+    vol.Optional(ATTR_DURATION): vol.All(
+        cv.time_period,
+        vol.Range(min=timedelta(minutes=5), max=timedelta(days=1)),
+    ),
+}
 
 
 async def async_setup_platform(
-    hass: HomeAssistantType, config: ConfigType, async_add_entities, discovery_info=None
+    hass: HomeAssistant,
+    config: ConfigType,
+    async_add_entities: AddEntitiesCallback,
+    discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
     """Set up the Genius Hub switch entities."""
     if discovery_info is None:
@@ -43,7 +46,7 @@ async def async_setup_platform(
     )
 
     # Register custom services
-    platform = entity_platform.current_platform.get()
+    platform = entity_platform.async_get_current_platform()
 
     platform.async_register_entity_service(
         SVC_SET_SWITCH_OVERRIDE,
@@ -58,7 +61,7 @@ class GeniusSwitch(GeniusZone, SwitchEntity):
     @property
     def device_class(self):
         """Return the class of this device, from component DEVICE_CLASSES."""
-        return DEVICE_CLASS_OUTLET
+        return SwitchDeviceClass.OUTLET
 
     @property
     def is_on(self) -> bool:

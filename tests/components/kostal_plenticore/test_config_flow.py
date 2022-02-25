@@ -4,8 +4,7 @@ from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 from kostal.plenticore import PlenticoreAuthenticationException
 
-from homeassistant import config_entries, setup
-from homeassistant.components.kostal_plenticore import config_flow
+from homeassistant import config_entries
 from homeassistant.components.kostal_plenticore.const import DOMAIN
 
 from tests.common import MockConfigEntry
@@ -13,7 +12,7 @@ from tests.common import MockConfigEntry
 
 async def test_formx(hass):
     """Test we get the form."""
-    await setup.async_setup_component(hass, "persistent_notification", {})
+
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
@@ -23,8 +22,6 @@ async def test_formx(hass):
     with patch(
         "homeassistant.components.kostal_plenticore.config_flow.PlenticoreApiClient"
     ) as mock_api_class, patch(
-        "homeassistant.components.kostal_plenticore.async_setup", return_value=True
-    ) as mock_setup, patch(
         "homeassistant.components.kostal_plenticore.async_setup_entry",
         return_value=True,
     ) as mock_setup_entry:
@@ -63,7 +60,6 @@ async def test_formx(hass):
         "password": "test-password",
     }
     await hass.async_block_till_done()
-    assert len(mock_setup.mock_calls) == 1
     assert len(mock_setup_entry.mock_calls) == 1
 
 
@@ -191,16 +187,3 @@ async def test_already_configured(hass):
 
     assert result2["type"] == "abort"
     assert result2["reason"] == "already_configured"
-
-
-def test_configured_instances(hass):
-    """Test configured_instances returns all configured hosts."""
-    MockConfigEntry(
-        domain="kostal_plenticore",
-        data={"host": "2.2.2.2", "password": "foobar"},
-        unique_id="112233445566",
-    ).add_to_hass(hass)
-
-    result = config_flow.configured_instances(hass)
-
-    assert result == {"2.2.2.2"}

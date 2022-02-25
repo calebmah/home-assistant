@@ -15,7 +15,8 @@ from pyipp import (
 )
 import voluptuous as vol
 
-from homeassistant.config_entries import CONN_CLASS_LOCAL_POLL, ConfigFlow
+from homeassistant.components import zeroconf
+from homeassistant.config_entries import ConfigFlow
 from homeassistant.const import (
     CONF_HOST,
     CONF_NAME,
@@ -23,15 +24,16 @@ from homeassistant.const import (
     CONF_SSL,
     CONF_VERIFY_SSL,
 )
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.typing import ConfigType, HomeAssistantType
 
 from .const import CONF_BASE_PATH, CONF_SERIAL, CONF_UUID, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def validate_input(hass: HomeAssistantType, data: dict) -> dict[str, Any]:
+async def validate_input(hass: HomeAssistant, data: dict) -> dict[str, Any]:
     """Validate the user input allows us to connect.
 
     Data has the keys from DATA_SCHEMA with values provided by the user.
@@ -55,15 +57,14 @@ class IPPFlowHandler(ConfigFlow, domain=DOMAIN):
     """Handle an IPP config flow."""
 
     VERSION = 1
-    CONNECTION_CLASS = CONN_CLASS_LOCAL_POLL
 
     def __init__(self):
         """Set up the instance."""
         self.discovery_info = {}
 
     async def async_step_user(
-        self, user_input: ConfigType | None = None
-    ) -> dict[str, Any]:
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
         """Handle a flow initiated by the user."""
         if user_input is None:
             return self._show_setup_form()
@@ -99,25 +100,32 @@ class IPPFlowHandler(ConfigFlow, domain=DOMAIN):
 
         return self.async_create_entry(title=user_input[CONF_HOST], data=user_input)
 
-    async def async_step_zeroconf(self, discovery_info: ConfigType) -> dict[str, Any]:
+    async def async_step_zeroconf(
+        self, discovery_info: zeroconf.ZeroconfServiceInfo
+    ) -> FlowResult:
         """Handle zeroconf discovery."""
-        port = discovery_info[CONF_PORT]
-        zctype = discovery_info["type"]
-        name = discovery_info[CONF_NAME].replace(f".{zctype}", "")
+        host = discovery_info.host
+
+        # Avoid probing devices that already have an entry
+        self._async_abort_entries_match({CONF_HOST: host})
+
+        port = discovery_info.port
+        zctype = discovery_info.type
+        name = discovery_info.name.replace(f".{zctype}", "")
         tls = zctype == "_ipps._tcp.local."
-        base_path = discovery_info["properties"].get("rp", "ipp/print")
+        base_path = discovery_info.properties.get("rp", "ipp/print")
 
         self.context.update({"title_placeholders": {"name": name}})
 
         self.discovery_info.update(
             {
-                CONF_HOST: discovery_info[CONF_HOST],
+                CONF_HOST: host,
                 CONF_PORT: port,
                 CONF_SSL: tls,
                 CONF_VERIFY_SSL: False,
                 CONF_BASE_PATH: f"/{base_path}",
                 CONF_NAME: name,
-                CONF_UUID: discovery_info["properties"].get("UUID"),
+                CONF_UUID: discovery_info.properties.get("UUID"),
             }
         )
 
@@ -166,8 +174,8 @@ class IPPFlowHandler(ConfigFlow, domain=DOMAIN):
         return await self.async_step_zeroconf_confirm()
 
     async def async_step_zeroconf_confirm(
-        self, user_input: ConfigType = None
-    ) -> dict[str, Any]:
+        self, user_input: dict[str, Any] = None
+    ) -> FlowResult:
         """Handle a confirmation flow initiated by zeroconf."""
         if user_input is None:
             return self.async_show_form(
@@ -181,7 +189,7 @@ class IPPFlowHandler(ConfigFlow, domain=DOMAIN):
             data=self.discovery_info,
         )
 
-    def _show_setup_form(self, errors: dict | None = None) -> dict[str, Any]:
+    def _show_setup_form(self, errors: dict | None = None) -> FlowResult:
         """Show the setup form to the user."""
         return self.async_show_form(
             step_id="user",

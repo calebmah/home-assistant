@@ -1,11 +1,12 @@
 """Test the MySensors config flow."""
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 
-from homeassistant import config_entries, setup
+from homeassistant import config_entries
 from homeassistant.components.mysensors.const import (
     CONF_BAUD_RATE,
     CONF_DEVICE,
@@ -23,16 +24,17 @@ from homeassistant.components.mysensors.const import (
     DOMAIN,
     ConfGatewayType,
 )
-from homeassistant.helpers.typing import HomeAssistantType
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResult
 
 from tests.common import MockConfigEntry
 
 
 async def get_form(
-    hass: HomeAssistantType, gatway_type: ConfGatewayType, expected_step_id: str
-):
+    hass: HomeAssistant, gatway_type: ConfGatewayType, expected_step_id: str
+) -> FlowResult:
     """Get a form for the given gateway type."""
-    await setup.async_setup_component(hass, "persistent_notification", {})
+
     stepuser = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
@@ -50,7 +52,7 @@ async def get_form(
     return result
 
 
-async def test_config_mqtt(hass: HomeAssistantType, mqtt: None) -> None:
+async def test_config_mqtt(hass: HomeAssistant, mqtt: None) -> None:
     """Test configuring a mqtt gateway."""
     step = await get_form(hass, CONF_GATEWAY_TYPE_MQTT, "gw_mqtt")
     flow_id = step["flow_id"]
@@ -88,9 +90,9 @@ async def test_config_mqtt(hass: HomeAssistantType, mqtt: None) -> None:
     assert len(mock_setup_entry.mock_calls) == 1
 
 
-async def test_missing_mqtt(hass: HomeAssistantType) -> None:
+async def test_missing_mqtt(hass: HomeAssistant) -> None:
     """Test configuring a mqtt gateway without mqtt integration setup."""
-    await setup.async_setup_component(hass, "persistent_notification", {})
+
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
@@ -106,7 +108,7 @@ async def test_missing_mqtt(hass: HomeAssistantType) -> None:
     assert result["errors"] == {"base": "mqtt_required"}
 
 
-async def test_config_serial(hass: HomeAssistantType):
+async def test_config_serial(hass: HomeAssistant) -> None:
     """Test configuring a gateway via serial."""
     step = await get_form(hass, CONF_GATEWAY_TYPE_SERIAL, "gw_serial")
     flow_id = step["flow_id"]
@@ -146,7 +148,7 @@ async def test_config_serial(hass: HomeAssistantType):
     assert len(mock_setup_entry.mock_calls) == 1
 
 
-async def test_config_tcp(hass: HomeAssistantType):
+async def test_config_tcp(hass: HomeAssistant) -> None:
     """Test configuring a gateway via tcp."""
     step = await get_form(hass, CONF_GATEWAY_TYPE_TCP, "gw_tcp")
     flow_id = step["flow_id"]
@@ -183,7 +185,7 @@ async def test_config_tcp(hass: HomeAssistantType):
     assert len(mock_setup_entry.mock_calls) == 1
 
 
-async def test_fail_to_connect(hass: HomeAssistantType):
+async def test_fail_to_connect(hass: HomeAssistant) -> None:
     """Test configuring a gateway via tcp."""
     step = await get_form(hass, CONF_GATEWAY_TYPE_TCP, "gw_tcp")
     flow_id = step["flow_id"]
@@ -208,8 +210,9 @@ async def test_fail_to_connect(hass: HomeAssistantType):
 
     assert result2["type"] == "form"
     assert "errors" in result2
-    assert "base" in result2["errors"]
-    assert result2["errors"]["base"] == "cannot_connect"
+    errors = result2["errors"]
+    assert errors
+    assert errors.get("base") == "cannot_connect"
     assert len(mock_setup.mock_calls) == 0
     assert len(mock_setup_entry.mock_calls) == 0
 
@@ -267,16 +270,6 @@ async def test_fail_to_connect(hass: HomeAssistantType):
             {
                 CONF_TCP_PORT: 5003,
                 CONF_DEVICE: "127.0.0.1",
-            },
-            CONF_VERSION,
-            "invalid_version",
-        ),
-        (
-            CONF_GATEWAY_TYPE_TCP,
-            "gw_tcp",
-            {
-                CONF_TCP_PORT: 5003,
-                CONF_DEVICE: "127.0.0.1",
                 CONF_VERSION: "4",
             },
             CONF_VERSION,
@@ -299,6 +292,7 @@ async def test_fail_to_connect(hass: HomeAssistantType):
             {
                 CONF_TCP_PORT: 5003,
                 CONF_DEVICE: "127.0.0.",
+                CONF_VERSION: "2.4",
             },
             CONF_DEVICE,
             "invalid_ip",
@@ -309,6 +303,7 @@ async def test_fail_to_connect(hass: HomeAssistantType):
             {
                 CONF_TCP_PORT: 5003,
                 CONF_DEVICE: "abcd",
+                CONF_VERSION: "2.4",
             },
             CONF_DEVICE,
             "invalid_ip",
@@ -365,13 +360,13 @@ async def test_fail_to_connect(hass: HomeAssistantType):
     ],
 )
 async def test_config_invalid(
-    hass: HomeAssistantType,
-    mqtt: config_entries.ConfigEntry,
+    hass: HomeAssistant,
+    mqtt: None,
     gateway_type: ConfGatewayType,
     expected_step_id: str,
-    user_input: dict[str, any],
-    err_field,
-    err_string,
+    user_input: dict[str, Any],
+    err_field: str,
+    err_string: str,
 ) -> None:
     """Perform a test that is expected to generate an error."""
     step = await get_form(hass, gateway_type, expected_step_id)
@@ -379,6 +374,9 @@ async def test_config_invalid(
 
     with patch(
         "homeassistant.components.mysensors.config_flow.try_connect", return_value=True
+    ), patch(
+        "homeassistant.components.mysensors.gateway.socket.getaddrinfo",
+        side_effect=OSError,
     ), patch(
         "homeassistant.components.mysensors.async_setup", return_value=True
     ) as mock_setup, patch(
@@ -393,8 +391,10 @@ async def test_config_invalid(
 
     assert result2["type"] == "form"
     assert "errors" in result2
-    assert err_field in result2["errors"]
-    assert result2["errors"][err_field] == err_string
+    errors = result2["errors"]
+    assert errors
+    assert err_field in errors
+    assert errors[err_field] == err_string
     assert len(mock_setup.mock_calls) == 0
     assert len(mock_setup_entry.mock_calls) == 0
 
@@ -440,9 +440,8 @@ async def test_config_invalid(
         },
     ],
 )
-async def test_import(hass: HomeAssistantType, mqtt: None, user_input: dict) -> None:
+async def test_import(hass: HomeAssistant, mqtt: None, user_input: dict) -> None:
     """Test importing a gateway."""
-    await setup.async_setup_component(hass, "persistent_notification", {})
 
     with patch("sys.platform", "win32"), patch(
         "homeassistant.components.mysensors.config_flow.try_connect", return_value=True
@@ -731,14 +730,13 @@ async def test_import(hass: HomeAssistantType, mqtt: None, user_input: dict) -> 
     ],
 )
 async def test_duplicate(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     mqtt: None,
     first_input: dict,
     second_input: dict,
     expected_result: tuple[str, str] | None,
 ) -> None:
     """Test duplicate detection."""
-    await setup.async_setup_component(hass, "persistent_notification", {})
 
     with patch("sys.platform", "win32"), patch(
         "homeassistant.components.mysensors.config_flow.try_connect", return_value=True

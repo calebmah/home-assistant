@@ -27,6 +27,7 @@ from homeassistant.const import (
     SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
     STATE_OFF,
+    STATE_ON,
 )
 
 from .common import setup_platform
@@ -39,7 +40,7 @@ async def test_attributes(hass):
     await setup_platform(hass, HUMIDIFIER_DOMAIN)
 
     state = hass.states.get(DEVICE_ID)
-    assert state.state == STATE_OFF
+    assert state.state == STATE_ON
     assert state.attributes.get(ATTR_MIN_HUMIDITY) == DEFAULT_MIN_HUMIDITY
     assert state.attributes.get(ATTR_MAX_HUMIDITY) == DEFAULT_MAX_HUMIDITY
     assert state.attributes.get(ATTR_HUMIDITY) == 40
@@ -54,7 +55,7 @@ async def test_attributes(hass):
 
 
 async def test_turn_on(hass):
-    """Test the humidifer can be turned on."""
+    """Test the humidifier can be turned on."""
     with patch("pyecobee.Ecobee.set_humidifier_mode") as mock_turn_on:
         await setup_platform(hass, HUMIDIFIER_DOMAIN)
 
@@ -69,7 +70,7 @@ async def test_turn_on(hass):
 
 
 async def test_turn_off(hass):
-    """Test the humidifer can be turned off."""
+    """Test the humidifier can be turned off."""
     with patch("pyecobee.Ecobee.set_humidifier_mode") as mock_turn_off:
         await setup_platform(hass, HUMIDIFIER_DOMAIN)
 
@@ -84,7 +85,7 @@ async def test_turn_off(hass):
 
 
 async def test_set_mode(hass):
-    """Test the humidifer can change modes."""
+    """Test the humidifier can change modes."""
     with patch("pyecobee.Ecobee.set_humidifier_mode") as mock_set_mode:
         await setup_platform(hass, HUMIDIFIER_DOMAIN)
 
@@ -116,7 +117,7 @@ async def test_set_mode(hass):
 
 
 async def test_set_humidity(hass):
-    """Test the humidifer can set humidity level."""
+    """Test the humidifier can set humidity level."""
     with patch("pyecobee.Ecobee.set_humidity") as mock_set_humidity:
         await setup_platform(hass, HUMIDIFIER_DOMAIN)
 

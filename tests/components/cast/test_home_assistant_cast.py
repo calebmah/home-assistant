@@ -2,22 +2,34 @@
 
 from unittest.mock import patch
 
-from homeassistant import config_entries
+import pytest
+
 from homeassistant.components.cast import home_assistant_cast
 from homeassistant.config import async_process_ha_core_config
+from homeassistant.exceptions import HomeAssistantError
 
 from tests.common import MockConfigEntry, async_mock_signal
 
 
 async def test_service_show_view(hass, mock_zeroconf):
-    """Test we don't set app id in prod."""
+    """Test showing a view."""
+    await home_assistant_cast.async_setup_ha_cast(hass, MockConfigEntry())
+    calls = async_mock_signal(hass, home_assistant_cast.SIGNAL_HASS_CAST_SHOW_VIEW)
+
+    # No valid URL
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "cast",
+            "show_lovelace_view",
+            {"entity_id": "media_player.kitchen", "view_path": "mock_path"},
+            blocking=True,
+        )
+
+    # Set valid URL
     await async_process_ha_core_config(
         hass,
         {"external_url": "https://example.com"},
     )
-    await home_assistant_cast.async_setup_ha_cast(hass, MockConfigEntry())
-    calls = async_mock_signal(hass, home_assistant_cast.SIGNAL_HASS_CAST_SHOW_VIEW)
-
     await hass.services.async_call(
         "cast",
         "show_lovelace_view",
@@ -30,7 +42,7 @@ async def test_service_show_view(hass, mock_zeroconf):
     assert controller.hass_url == "https://example.com"
     assert controller.client_id is None
     # Verify user did not accidentally submit their dev app id
-    assert controller.supporting_app_id == "B12CE3CA"
+    assert controller.supporting_app_id == "A078F6B0"
     assert entity_id == "media_player.kitchen"
     assert view_path == "mock_path"
     assert url_path is None
@@ -93,7 +105,6 @@ async def test_use_cloud_url(hass, mock_zeroconf):
 async def test_remove_entry(hass, mock_zeroconf):
     """Test removing config entry removes user."""
     entry = MockConfigEntry(
-        connection_class=config_entries.CONN_CLASS_LOCAL_PUSH,
         data={},
         domain="cast",
         title="Google Cast",

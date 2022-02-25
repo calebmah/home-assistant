@@ -1,8 +1,8 @@
-"""Config flow for UniFi.
+"""Config flow for UniFi Network integration.
 
 Provides user initiated configuration flow.
-Discovery of controllers hosted on UDM and UDM Pro devices through SSDP.
-Reauthentication when issue with credentials are reported.
+Discovery of UniFi Network instances hosted on UDM and UDM Pro devices
+through SSDP. Reauthentication when issue with credentials are reported.
 Configuration of options through options flow.
 """
 import socket
@@ -20,6 +20,7 @@ from homeassistant.const import (
     CONF_VERIFY_SSL,
 )
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import FlowResult
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.device_registry import format_mac
 
@@ -56,10 +57,9 @@ MODEL_PORTS = {
 
 
 class UnifiFlowHandler(config_entries.ConfigFlow, domain=UNIFI_DOMAIN):
-    """Handle a UniFi config flow."""
+    """Handle a UniFi Network config flow."""
 
     VERSION = 1
-    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
 
     @staticmethod
     @callback
@@ -68,7 +68,7 @@ class UnifiFlowHandler(config_entries.ConfigFlow, domain=UNIFI_DOMAIN):
         return UnifiOptionsFlowHandler(config_entry)
 
     def __init__(self):
-        """Initialize the UniFi flow."""
+        """Initialize the UniFi Network flow."""
         self.config = {}
         self.site_ids = {}
         self.site_names = {}
@@ -216,18 +216,17 @@ class UnifiFlowHandler(config_entries.ConfigFlow, domain=UNIFI_DOMAIN):
 
         return await self.async_step_user()
 
-    async def async_step_ssdp(self, discovery_info):
+    async def async_step_ssdp(self, discovery_info: ssdp.SsdpServiceInfo) -> FlowResult:
         """Handle a discovered UniFi device."""
-        parsed_url = urlparse(discovery_info[ssdp.ATTR_SSDP_LOCATION])
-        model_description = discovery_info[ssdp.ATTR_UPNP_MODEL_DESCRIPTION]
-        mac_address = format_mac(discovery_info[ssdp.ATTR_UPNP_SERIAL])
+        parsed_url = urlparse(discovery_info.ssdp_location)
+        model_description = discovery_info.upnp[ssdp.ATTR_UPNP_MODEL_DESCRIPTION]
+        mac_address = format_mac(discovery_info.upnp[ssdp.ATTR_UPNP_SERIAL])
 
         self.config = {
             CONF_HOST: parsed_url.hostname,
         }
 
-        if self._host_already_configured(self.config[CONF_HOST]):
-            return self.async_abort(reason="already_configured")
+        self._async_abort_entries_match({CONF_HOST: self.config[CONF_HOST]})
 
         await self.async_set_unique_id(mac_address)
         self._abort_if_unique_id_configured(updates=self.config)
@@ -237,31 +236,26 @@ class UnifiFlowHandler(config_entries.ConfigFlow, domain=UNIFI_DOMAIN):
             CONF_SITE_ID: DEFAULT_SITE_ID,
         }
 
-        port = MODEL_PORTS.get(model_description)
-        if port is not None:
+        if (port := MODEL_PORTS.get(model_description)) is not None:
             self.config[CONF_PORT] = port
+            self.context[
+                "configuration_url"
+            ] = f"https://{self.config[CONF_HOST]}:{port}"
 
         return await self.async_step_user()
 
-    def _host_already_configured(self, host):
-        """See if we already have a UniFi entry matching the host."""
-        for entry in self._async_current_entries():
-            if entry.data.get(CONF_HOST) == host:
-                return True
-        return False
-
 
 class UnifiOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle Unifi options."""
+    """Handle Unifi Network options."""
 
     def __init__(self, config_entry):
-        """Initialize UniFi options flow."""
+        """Initialize UniFi Network options flow."""
         self.config_entry = config_entry
         self.options = dict(config_entry.options)
         self.controller = None
 
     async def async_step_init(self, user_input=None):
-        """Manage the UniFi options."""
+        """Manage the UniFi Network options."""
         self.controller = self.hass.data[UNIFI_DOMAIN][self.config_entry.entry_id]
         self.options[CONF_BLOCK_CLIENT] = self.controller.option_block_clients
 
@@ -300,6 +294,7 @@ class UnifiOptionsFlowHandler(config_entries.OptionsFlow):
                     ): cv.multi_select(clients_to_block),
                 }
             ),
+            last_step=True,
         )
 
     async def async_step_device_tracker(self, user_input=None):
@@ -324,6 +319,10 @@ class UnifiOptionsFlowHandler(config_entries.OptionsFlow):
         )
         ssid_filter = {ssid: ssid for ssid in sorted(ssids)}
 
+        selected_ssids_to_filter = [
+            ssid for ssid in self.controller.option_ssid_filter if ssid in ssid_filter
+        ]
+
         return self.async_show_form(
             step_id="device_tracker",
             data_schema=vol.Schema(
@@ -341,7 +340,7 @@ class UnifiOptionsFlowHandler(config_entries.OptionsFlow):
                         default=self.controller.option_track_devices,
                     ): bool,
                     vol.Optional(
-                        CONF_SSID_FILTER, default=self.controller.option_ssid_filter
+                        CONF_SSID_FILTER, default=selected_ssids_to_filter
                     ): cv.multi_select(ssid_filter),
                     vol.Optional(
                         CONF_DETECTION_TIME,
@@ -355,6 +354,7 @@ class UnifiOptionsFlowHandler(config_entries.OptionsFlow):
                     ): bool,
                 }
             ),
+            last_step=False,
         )
 
     async def async_step_client_control(self, user_input=None):
@@ -372,12 +372,18 @@ class UnifiOptionsFlowHandler(config_entries.OptionsFlow):
                 client.mac
             ] = f"{client.name or client.hostname} ({client.mac})"
 
+        selected_clients_to_block = [
+            client
+            for client in self.options.get(CONF_BLOCK_CLIENT, [])
+            if client in clients_to_block
+        ]
+
         return self.async_show_form(
             step_id="client_control",
             data_schema=vol.Schema(
                 {
                     vol.Optional(
-                        CONF_BLOCK_CLIENT, default=self.options[CONF_BLOCK_CLIENT]
+                        CONF_BLOCK_CLIENT, default=selected_clients_to_block
                     ): cv.multi_select(clients_to_block),
                     vol.Optional(
                         CONF_POE_CLIENTS,
@@ -392,6 +398,7 @@ class UnifiOptionsFlowHandler(config_entries.OptionsFlow):
                 }
             ),
             errors=errors,
+            last_step=False,
         )
 
     async def async_step_statistics_sensors(self, user_input=None):
@@ -414,6 +421,7 @@ class UnifiOptionsFlowHandler(config_entries.OptionsFlow):
                     ): bool,
                 }
             ),
+            last_step=True,
         )
 
     async def _update_options(self):
@@ -422,7 +430,7 @@ class UnifiOptionsFlowHandler(config_entries.OptionsFlow):
 
 
 async def async_discover_unifi(hass):
-    """Discover UniFi address."""
+    """Discover UniFi Network address."""
     try:
         return await hass.async_add_executor_job(socket.gethostbyname, "unifi")
     except socket.gaierror:

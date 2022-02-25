@@ -1,5 +1,4 @@
 """The Coronavirus integration."""
-import asyncio
 from datetime import timedelta
 import logging
 
@@ -7,15 +6,17 @@ import async_timeout
 import coronavirus
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import aiohttp_client, entity_registry, update_coordinator
+from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
 
-PLATFORMS = ["sensor"]
+PLATFORMS = [Platform.SENSOR]
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Coronavirus component."""
     # Make sure coordinator is initialized.
     await get_coordinator(hass)
@@ -48,24 +49,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not coordinator.last_update_success:
         await coordinator.async_config_entry_first_refresh()
 
-    for platform in PLATFORMS:
-        hass.async_create_task(
-            hass.config_entries.async_forward_entry_setup(entry, platform)
-        )
+    hass.config_entries.async_setup_platforms(entry, PLATFORMS)
 
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    return all(
-        await asyncio.gather(
-            *[
-                hass.config_entries.async_forward_entry_unload(entry, platform)
-                for platform in PLATFORMS
-            ]
-        )
-    )
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
 async def get_coordinator(
@@ -76,7 +67,7 @@ async def get_coordinator(
         return hass.data[DOMAIN]
 
     async def async_get_cases():
-        with async_timeout.timeout(10):
+        async with async_timeout.timeout(10):
             return {
                 case.country: case
                 for case in await coronavirus.get_cases(

@@ -17,15 +17,13 @@ from homeassistant.components.media_player.const import (
     MEDIA_CLASS_IMAGE,
     MEDIA_CLASS_VIDEO,
 )
-from homeassistant.components.media_source.const import MEDIA_MIME_TYPES
 from homeassistant.components.media_source.models import (
     BrowseMediaSource,
     MediaSource,
     MediaSourceItem,
     PlayMedia,
 )
-from homeassistant.core import callback
-from homeassistant.helpers.typing import HomeAssistantType
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
 
 from .browse_media import _find_media_image
@@ -42,7 +40,7 @@ MEDIA_CLASS_MAP = {
 }
 
 
-async def async_get_media_source(hass: HomeAssistantType):
+async def async_get_media_source(hass: HomeAssistant):
     """Set up Xbox media source."""
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     client = hass.data[DOMAIN][entry.entry_id]["client"]
@@ -75,11 +73,11 @@ class XboxSource(MediaSource):
 
     name: str = "Xbox Game Media"
 
-    def __init__(self, hass: HomeAssistantType, client: XboxLiveClient):
+    def __init__(self, hass: HomeAssistant, client: XboxLiveClient) -> None:
         """Initialize Xbox source."""
         super().__init__(DOMAIN)
 
-        self.hass: HomeAssistantType = hass
+        self.hass: HomeAssistant = hass
         self.client: XboxLiveClient = client
 
     async def async_resolve_media(self, item: MediaSourceItem) -> PlayMedia:
@@ -88,9 +86,7 @@ class XboxSource(MediaSource):
         kind = category.split("#", 1)[1]
         return PlayMedia(url, MIME_TYPE_MAP[kind])
 
-    async def async_browse_media(
-        self, item: MediaSourceItem, media_types: tuple[str] = MEDIA_MIME_TYPES
-    ) -> BrowseMediaSource:
+    async def async_browse_media(self, item: MediaSourceItem) -> BrowseMediaSource:
         """Return media."""
         title, category, _ = async_parse_identifier(item)
 

@@ -14,7 +14,9 @@ import objgraph
 from pyprof2calltree import convert
 import voluptuous as vol
 
+from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_SCAN_INTERVAL, CONF_TYPE
 from homeassistant.core import HomeAssistant, ServiceCall
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.event import async_track_time_interval
@@ -44,33 +46,31 @@ SERVICES = (
 DEFAULT_SCAN_INTERVAL = timedelta(seconds=30)
 
 CONF_SECONDS = "seconds"
-CONF_SCAN_INTERVAL = "scan_interval"
-CONF_TYPE = "type"
 
 LOG_INTERVAL_SUB = "log_interval_subscription"
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Profiler from a config entry."""
-
     lock = asyncio.Lock()
     domain_data = hass.data[DOMAIN] = {}
 
-    async def _async_run_profile(call: ServiceCall):
+    async def _async_run_profile(call: ServiceCall) -> None:
         async with lock:
             await _async_generate_profile(hass, call)
 
-    async def _async_run_memory_profile(call: ServiceCall):
+    async def _async_run_memory_profile(call: ServiceCall) -> None:
         async with lock:
             await _async_generate_memory_profile(hass, call)
 
-    async def _async_start_log_objects(call: ServiceCall):
+    async def _async_start_log_objects(call: ServiceCall) -> None:
         if LOG_INTERVAL_SUB in domain_data:
             domain_data[LOG_INTERVAL_SUB]()
 
-        hass.components.persistent_notification.async_create(
+        persistent_notification.async_create(
+            hass,
             "Object growth logging has started. See [the logs](/config/logs) to track the growth of new objects.",
             title="Object growth logging started",
             notification_id="profile_object_logging",
@@ -80,14 +80,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             hass, _log_objects, call.data[CONF_SCAN_INTERVAL]
         )
 
-    async def _async_stop_log_objects(call: ServiceCall):
+    async def _async_stop_log_objects(call: ServiceCall) -> None:
         if LOG_INTERVAL_SUB not in domain_data:
             return
 
-        hass.components.persistent_notification.async_dismiss("profile_object_logging")
+        persistent_notification.async_dismiss(hass, "profile_object_logging")
         domain_data.pop(LOG_INTERVAL_SUB)()
 
-    def _dump_log_objects(call: ServiceCall):
+    def _dump_log_objects(call: ServiceCall) -> None:
         obj_type = call.data[CONF_TYPE]
 
         _LOGGER.critical(
@@ -96,7 +96,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             objgraph.by_type(obj_type),
         )
 
-        hass.components.persistent_notification.create(
+        persistent_notification.create(
+            hass,
             f"Objects with type {obj_type} have been dumped to the log. See [the logs](/config/logs) to review the repr of the objects.",
             title="Object dump completed",
             notification_id="profile_object_dump",
@@ -196,7 +197,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     for service in SERVICES:
         hass.services.async_remove(domain=DOMAIN, service=service)
@@ -208,7 +209,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
 
 async def _async_generate_profile(hass: HomeAssistant, call: ServiceCall):
     start_time = int(time.time() * 1000000)
-    hass.components.persistent_notification.async_create(
+    persistent_notification.async_create(
+        hass,
         "The profile has started. This notification will be updated when it is complete.",
         title="Profile Started",
         notification_id=f"profiler_{start_time}",
@@ -223,7 +225,8 @@ async def _async_generate_profile(hass: HomeAssistant, call: ServiceCall):
     await hass.async_add_executor_job(
         _write_profile, profiler, cprofile_path, callgrind_path
     )
-    hass.components.persistent_notification.async_create(
+    persistent_notification.async_create(
+        hass,
         f"Wrote cProfile data to {cprofile_path} and callgrind data to {callgrind_path}",
         title="Profile Complete",
         notification_id=f"profiler_{start_time}",
@@ -232,7 +235,8 @@ async def _async_generate_profile(hass: HomeAssistant, call: ServiceCall):
 
 async def _async_generate_memory_profile(hass: HomeAssistant, call: ServiceCall):
     start_time = int(time.time() * 1000000)
-    hass.components.persistent_notification.async_create(
+    persistent_notification.async_create(
+        hass,
         "The memory profile has started. This notification will be updated when it is complete.",
         title="Profile Started",
         notification_id=f"memory_profiler_{start_time}",
@@ -244,7 +248,8 @@ async def _async_generate_memory_profile(hass: HomeAssistant, call: ServiceCall)
 
     heap_path = hass.config.path(f"heap_profile.{start_time}.hpy")
     await hass.async_add_executor_job(_write_memory_profile, heap, heap_path)
-    hass.components.persistent_notification.async_create(
+    persistent_notification.async_create(
+        hass,
         f"Wrote heapy memory profile to {heap_path}",
         title="Profile Complete",
         notification_id=f"memory_profiler_{start_time}",

@@ -6,7 +6,7 @@ from typing import Any
 from adguardhome import AdGuardHome, AdGuardHomeConnectionError
 import voluptuous as vol
 
-from homeassistant import config_entries
+from homeassistant.components.hassio import HassioServiceInfo
 from homeassistant.config_entries import ConfigFlow
 from homeassistant.const import (
     CONF_HOST,
@@ -16,7 +16,7 @@ from homeassistant.const import (
     CONF_USERNAME,
     CONF_VERIFY_SSL,
 )
-from homeassistant.data_entry_flow import FlowResultDict
+from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import DOMAIN
@@ -26,13 +26,12 @@ class AdGuardHomeFlowHandler(ConfigFlow, domain=DOMAIN):
     """Handle a AdGuard Home config flow."""
 
     VERSION = 1
-    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
 
     _hassio_discovery = None
 
     async def _show_setup_form(
         self, errors: dict[str, str] | None = None
-    ) -> FlowResultDict:
+    ) -> FlowResult:
         """Show the setup form to the user."""
         return self.async_show_form(
             step_id="user",
@@ -51,8 +50,9 @@ class AdGuardHomeFlowHandler(ConfigFlow, domain=DOMAIN):
 
     async def _show_hassio_form(
         self, errors: dict[str, str] | None = None
-    ) -> FlowResultDict:
+    ) -> FlowResult:
         """Show the Hass.io confirmation form to the user."""
+        assert self._hassio_discovery
         return self.async_show_form(
             step_id="hassio_confirm",
             description_placeholders={"addon": self._hassio_discovery["addon"]},
@@ -62,28 +62,26 @@ class AdGuardHomeFlowHandler(ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResultDict:
+    ) -> FlowResult:
         """Handle a flow initiated by the user."""
         if user_input is None:
             return await self._show_setup_form(user_input)
 
-        entries = self._async_current_entries()
-        for entry in entries:
-            if (
-                entry.data[CONF_HOST] == user_input[CONF_HOST]
-                and entry.data[CONF_PORT] == user_input[CONF_PORT]
-            ):
-                return self.async_abort(reason="already_configured")
+        self._async_abort_entries_match(
+            {CONF_HOST: user_input[CONF_HOST], CONF_PORT: user_input[CONF_PORT]}
+        )
 
         errors = {}
 
         session = async_get_clientsession(self.hass, user_input[CONF_VERIFY_SSL])
 
+        username: str | None = user_input.get(CONF_USERNAME)
+        password: str | None = user_input.get(CONF_PASSWORD)
         adguard = AdGuardHome(
             user_input[CONF_HOST],
             port=user_input[CONF_PORT],
-            username=user_input.get(CONF_USERNAME),
-            password=user_input.get(CONF_PASSWORD),
+            username=username,
+            password=password,
             tls=user_input[CONF_SSL],
             verify_ssl=user_input[CONF_VERIFY_SSL],
             session=session,
@@ -107,19 +105,19 @@ class AdGuardHomeFlowHandler(ConfigFlow, domain=DOMAIN):
             },
         )
 
-    async def async_step_hassio(self, discovery_info: dict[str, Any]) -> FlowResultDict:
+    async def async_step_hassio(self, discovery_info: HassioServiceInfo) -> FlowResult:
         """Prepare configuration for a Hass.io AdGuard Home add-on.
 
         This flow is triggered by the discovery component.
         """
         await self._async_handle_discovery_without_unique_id()
 
-        self._hassio_discovery = discovery_info
+        self._hassio_discovery = discovery_info.config
         return await self.async_step_hassio_confirm()
 
     async def async_step_hassio_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResultDict:
+    ) -> FlowResult:
         """Confirm Supervisor discovery."""
         if user_input is None:
             return await self._show_hassio_form()
@@ -128,6 +126,7 @@ class AdGuardHomeFlowHandler(ConfigFlow, domain=DOMAIN):
 
         session = async_get_clientsession(self.hass, False)
 
+        assert self._hassio_discovery
         adguard = AdGuardHome(
             self._hassio_discovery[CONF_HOST],
             port=self._hassio_discovery[CONF_PORT],

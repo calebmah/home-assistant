@@ -7,13 +7,13 @@ import logging
 import os
 
 import aiohttp
-from aiohttp import hdrs, web
-from aiohttp.web_exceptions import HTTPBadGateway
+from aiohttp import ClientTimeout, hdrs, web
+from aiohttp.web_exceptions import HTTPBadGateway, HTTPBadRequest
 from multidict import CIMultiDict
 
 from homeassistant.components.http import HomeAssistantView
-from homeassistant.core import callback
-from homeassistant.helpers.typing import HomeAssistantType
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import X_HASSIO, X_INGRESS_PATH
 
@@ -21,9 +21,9 @@ _LOGGER = logging.getLogger(__name__)
 
 
 @callback
-def async_setup_ingress_view(hass: HomeAssistantType, host: str):
+def async_setup_ingress_view(hass: HomeAssistant, host: str):
     """Auth setup."""
-    websession = hass.helpers.aiohttp_client.async_get_clientsession()
+    websession = async_get_clientsession(hass)
 
     hassio_ingress = HassIOIngress(host, websession)
     hass.http.register_view(hassio_ingress)
@@ -36,7 +36,7 @@ class HassIOIngress(HomeAssistantView):
     url = "/api/hassio_ingress/{token}/{path:.*}"
     requires_auth = False
 
-    def __init__(self, host: str, websession: aiohttp.ClientSession):
+    def __init__(self, host: str, websession: aiohttp.ClientSession) -> None:
         """Initialize a Hass.io ingress view."""
         self._host = host
         self._websession = websession
@@ -118,7 +118,6 @@ class HassIOIngress(HomeAssistantView):
     ) -> web.Response | web.StreamResponse:
         """Ingress route for request."""
         url = self._create_url(token, path)
-        data = await request.read()
         source_header = _init_header(request, token)
 
         async with self._websession.request(
@@ -127,7 +126,8 @@ class HassIOIngress(HomeAssistantView):
             headers=source_header,
             params=request.query,
             allow_redirects=False,
-            data=data,
+            data=request.content,
+            timeout=ClientTimeout(total=None),
         ) as result:
             headers = _response_header(result)
 
@@ -135,7 +135,7 @@ class HassIOIngress(HomeAssistantView):
             if (
                 hdrs.CONTENT_LENGTH in result.headers
                 and int(result.headers.get(hdrs.CONTENT_LENGTH, 0)) < 4194000
-            ):
+            ) or result.status in (204, 304):
                 # Return Response
                 body = await result.read()
                 return web.Response(
@@ -154,7 +154,11 @@ class HassIOIngress(HomeAssistantView):
                 async for data in result.content.iter_chunked(4096):
                     await response.write(data)
 
-            except (aiohttp.ClientError, aiohttp.ClientPayloadError) as err:
+            except (
+                aiohttp.ClientError,
+                aiohttp.ClientPayloadError,
+                ConnectionResetError,
+            ) as err:
                 _LOGGER.debug("Stream error %s / %s: %s", token, path, err)
 
             return response
@@ -169,6 +173,7 @@ def _init_header(request: web.Request, token: str) -> CIMultiDict | dict[str, st
         if name in (
             hdrs.CONTENT_LENGTH,
             hdrs.CONTENT_ENCODING,
+            hdrs.TRANSFER_ENCODING,
             hdrs.SEC_WEBSOCKET_EXTENSIONS,
             hdrs.SEC_WEBSOCKET_PROTOCOL,
             hdrs.SEC_WEBSOCKET_VERSION,
@@ -185,7 +190,11 @@ def _init_header(request: web.Request, token: str) -> CIMultiDict | dict[str, st
 
     # Set X-Forwarded-For
     forward_for = request.headers.get(hdrs.X_FORWARDED_FOR)
-    connected_ip = ip_address(request.transport.get_extra_info("peername")[0])
+    if (peername := request.transport.get_extra_info("peername")) is None:
+        _LOGGER.error("Can't set forward_for header, missing peername")
+        raise HTTPBadRequest()
+
+    connected_ip = ip_address(peername[0])
     if forward_for:
         forward_for = f"{forward_for}, {connected_ip!s}"
     else:
@@ -193,8 +202,7 @@ def _init_header(request: web.Request, token: str) -> CIMultiDict | dict[str, st
     headers[hdrs.X_FORWARDED_FOR] = forward_for
 
     # Set X-Forwarded-Host
-    forward_host = request.headers.get(hdrs.X_FORWARDED_HOST)
-    if not forward_host:
+    if not (forward_host := request.headers.get(hdrs.X_FORWARDED_HOST)):
         forward_host = request.host
     headers[hdrs.X_FORWARDED_HOST] = forward_host
 
@@ -252,3 +260,5 @@ async def _websocket_forward(ws_from, ws_to):
                 await ws_to.close(code=ws_to.close_code, message=msg.extra)
     except RuntimeError:
         _LOGGER.debug("Ingress Websocket runtime error")
+    except ConnectionResetError:
+        _LOGGER.debug("Ingress Websocket Connection Reset")

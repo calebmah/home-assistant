@@ -1,4 +1,6 @@
 """Legacy Works with Nest climate implementation."""
+# mypy: ignore-errors
+
 import logging
 
 from nest.nest import APIError
@@ -32,6 +34,7 @@ from homeassistant.const import (
     TEMP_FAHRENHEIT,
 )
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.entity import DeviceInfo
 
 from .const import DATA_NEST, DOMAIN, SIGNAL_NEST_UPDATE
 
@@ -74,7 +77,7 @@ def setup_platform(hass, config, add_entities, discovery_info=None):
     """
 
 
-async def async_setup_legacy_entry(hass, entry, async_add_entities):
+async def async_setup_legacy_entry(hass, entry, async_add_entities) -> None:
     """Set up the Nest climate device based on a config entry."""
     temp_unit = hass.config.units.temperature_unit
 
@@ -166,15 +169,15 @@ class NestThermostat(ClimateEntity):
         return self.device.serial
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return information about the device."""
-        return {
-            "identifiers": {(DOMAIN, self.device.device_id)},
-            "name": self.device.name_long,
-            "manufacturer": "Nest Labs",
-            "model": "Thermostat",
-            "sw_version": self.device.software_version,
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.device.device_id)},
+            manufacturer="Nest Labs",
+            model="Thermostat",
+            name=self.device.name_long,
+            sw_version=self.device.software_version,
+        )
 
     @property
     def name(self):

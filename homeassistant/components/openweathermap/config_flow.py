@@ -30,7 +30,6 @@ class OpenWeatherMapConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow for OpenWeatherMap."""
 
     VERSION = CONFIG_FLOW_VERSION
-    CONNECTION_CLASS = config_entries.CONN_CLASS_CLOUD_POLL
 
     @staticmethod
     @callback
@@ -110,13 +109,15 @@ class OpenWeatherMapOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_MODE,
                     default=self.config_entry.options.get(
-                        CONF_MODE, DEFAULT_FORECAST_MODE
+                        CONF_MODE,
+                        self.config_entry.data.get(CONF_MODE, DEFAULT_FORECAST_MODE),
                     ),
                 ): vol.In(FORECAST_MODES),
                 vol.Optional(
                     CONF_LANGUAGE,
                     default=self.config_entry.options.get(
-                        CONF_LANGUAGE, DEFAULT_LANGUAGE
+                        CONF_LANGUAGE,
+                        self.config_entry.data.get(CONF_LANGUAGE, DEFAULT_LANGUAGE),
                     ),
                 ): vol.In(LANGUAGES),
             }

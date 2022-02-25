@@ -4,14 +4,15 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import patch
 
+from pytest import LogCaptureFixture
+
 from homeassistant import setup
 from homeassistant.components.sensor import DOMAIN
-from homeassistant.helpers.typing import HomeAssistantType
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry
 
 
-async def setup_test_entities(
-    hass: HomeAssistantType, config_dict: dict[str, Any]
-) -> None:
+async def setup_test_entities(hass: HomeAssistant, config_dict: dict[str, Any]) -> None:
     """Set up a test command line sensor entity."""
     assert await setup.async_setup_component(
         hass,
@@ -33,7 +34,7 @@ async def setup_test_entities(
     await hass.async_block_till_done()
 
 
-async def test_setup(hass: HomeAssistantType) -> None:
+async def test_setup(hass: HomeAssistant) -> None:
     """Test sensor setup."""
     await setup_test_entities(
         hass,
@@ -49,7 +50,7 @@ async def test_setup(hass: HomeAssistantType) -> None:
     assert entity_state.attributes["unit_of_measurement"] == "in"
 
 
-async def test_template(hass: HomeAssistantType) -> None:
+async def test_template(hass: HomeAssistant) -> None:
     """Test command sensor with template."""
     await setup_test_entities(
         hass,
@@ -64,7 +65,7 @@ async def test_template(hass: HomeAssistantType) -> None:
     assert float(entity_state.state) == 5
 
 
-async def test_template_render(hass: HomeAssistantType) -> None:
+async def test_template_render(hass: HomeAssistant) -> None:
     """Ensure command with templates get rendered properly."""
 
     await setup_test_entities(
@@ -78,7 +79,7 @@ async def test_template_render(hass: HomeAssistantType) -> None:
     assert entity_state.state == "template_value"
 
 
-async def test_template_render_with_quote(hass: HomeAssistantType) -> None:
+async def test_template_render_with_quote(hass: HomeAssistant) -> None:
     """Ensure command with templates and quotes get rendered properly."""
 
     with patch(
@@ -99,7 +100,9 @@ async def test_template_render_with_quote(hass: HomeAssistantType) -> None:
         )
 
 
-async def test_bad_template_render(caplog: Any, hass: HomeAssistantType) -> None:
+async def test_bad_template_render(
+    caplog: LogCaptureFixture, hass: HomeAssistant
+) -> None:
     """Test rendering a broken template."""
 
     await setup_test_entities(
@@ -112,7 +115,7 @@ async def test_bad_template_render(caplog: Any, hass: HomeAssistantType) -> None
     assert "Error rendering command template" in caplog.text
 
 
-async def test_bad_command(hass: HomeAssistantType) -> None:
+async def test_bad_command(hass: HomeAssistant) -> None:
     """Test bad command."""
     await setup_test_entities(
         hass,
@@ -125,7 +128,7 @@ async def test_bad_command(hass: HomeAssistantType) -> None:
     assert entity_state.state == "unknown"
 
 
-async def test_update_with_json_attrs(hass: HomeAssistantType) -> None:
+async def test_update_with_json_attrs(hass: HomeAssistant) -> None:
     """Test attributes get extracted from a JSON result."""
     await setup_test_entities(
         hass,
@@ -142,7 +145,9 @@ async def test_update_with_json_attrs(hass: HomeAssistantType) -> None:
     assert entity_state.attributes["key_three"] == "value_three"
 
 
-async def test_update_with_json_attrs_no_data(caplog, hass: HomeAssistantType) -> None:  # type: ignore[no-untyped-def]
+async def test_update_with_json_attrs_no_data(
+    caplog: LogCaptureFixture, hass: HomeAssistant
+) -> None:
     """Test attributes when no JSON result fetched."""
 
     await setup_test_entities(
@@ -158,7 +163,9 @@ async def test_update_with_json_attrs_no_data(caplog, hass: HomeAssistantType) -
     assert "Empty reply found when expecting JSON data" in caplog.text
 
 
-async def test_update_with_json_attrs_not_dict(caplog, hass: HomeAssistantType) -> None:  # type: ignore[no-untyped-def]
+async def test_update_with_json_attrs_not_dict(
+    caplog: LogCaptureFixture, hass: HomeAssistant
+) -> None:
     """Test attributes when the return value not a dict."""
 
     await setup_test_entities(
@@ -174,7 +181,9 @@ async def test_update_with_json_attrs_not_dict(caplog, hass: HomeAssistantType) 
     assert "JSON result was not a dictionary" in caplog.text
 
 
-async def test_update_with_json_attrs_bad_json(caplog, hass: HomeAssistantType) -> None:  # type: ignore[no-untyped-def]
+async def test_update_with_json_attrs_bad_json(
+    caplog: LogCaptureFixture, hass: HomeAssistant
+) -> None:
     """Test attributes when the return value is invalid JSON."""
 
     await setup_test_entities(
@@ -190,7 +199,9 @@ async def test_update_with_json_attrs_bad_json(caplog, hass: HomeAssistantType) 
     assert "Unable to parse output as JSON" in caplog.text
 
 
-async def test_update_with_missing_json_attrs(caplog, hass: HomeAssistantType) -> None:  # type: ignore[no-untyped-def]
+async def test_update_with_missing_json_attrs(
+    caplog: LogCaptureFixture, hass: HomeAssistant
+) -> None:
     """Test attributes when an expected key is missing."""
 
     await setup_test_entities(
@@ -209,7 +220,9 @@ async def test_update_with_missing_json_attrs(caplog, hass: HomeAssistantType) -
     assert "missing_key" not in entity_state.attributes
 
 
-async def test_update_with_unnecessary_json_attrs(caplog, hass: HomeAssistantType) -> None:  # type: ignore[no-untyped-def]
+async def test_update_with_unnecessary_json_attrs(
+    caplog: LogCaptureFixture, hass: HomeAssistant
+) -> None:
     """Test attributes when an expected key is missing."""
 
     await setup_test_entities(
@@ -225,3 +238,42 @@ async def test_update_with_unnecessary_json_attrs(caplog, hass: HomeAssistantTyp
     assert entity_state.attributes["key"] == "some_json_value"
     assert entity_state.attributes["another_key"] == "another_json_value"
     assert "key_three" not in entity_state.attributes
+
+
+async def test_unique_id(hass: HomeAssistant) -> None:
+    """Test unique_id option and if it only creates one sensor per id."""
+    assert await setup.async_setup_component(
+        hass,
+        DOMAIN,
+        {
+            DOMAIN: [
+                {
+                    "platform": "command_line",
+                    "unique_id": "unique",
+                    "command": "echo 0",
+                },
+                {
+                    "platform": "command_line",
+                    "unique_id": "not-so-unique-anymore",
+                    "command": "echo 1",
+                },
+                {
+                    "platform": "command_line",
+                    "unique_id": "not-so-unique-anymore",
+                    "command": "echo 2",
+                },
+            ]
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert len(hass.states.async_all()) == 2
+
+    ent_reg = entity_registry.async_get(hass)
+
+    assert len(ent_reg.entities) == 2
+    assert ent_reg.async_get_entity_id("sensor", "command_line", "unique") is not None
+    assert (
+        ent_reg.async_get_entity_id("sensor", "command_line", "not-so-unique-anymore")
+        is not None
+    )

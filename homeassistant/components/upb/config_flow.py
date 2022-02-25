@@ -62,8 +62,7 @@ async def _validate_input(data):
 
 
 def _make_url_from_data(data):
-    host = data.get(CONF_HOST)
-    if host:
+    if host := data.get(CONF_HOST):
         return host
 
     protocol = PROTOCOL_MAP[data[CONF_PROTOCOL]]
@@ -75,7 +74,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for UPB PIM."""
 
     VERSION = 1
-    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_PUSH
 
     def __init__(self):
         """Initialize the UPB config flow."""

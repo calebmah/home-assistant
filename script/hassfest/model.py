@@ -32,8 +32,9 @@ class Config:
     requirements: bool = attr.ib()
     errors: list[Error] = attr.ib(factory=list)
     cache: dict[str, Any] = attr.ib(factory=dict)
+    plugins: set[str] = attr.ib(factory=set)
 
-    def add_error(self, *args, **kwargs):
+    def add_error(self, *args: Any, **kwargs: Any) -> None:
         """Add an error."""
         self.errors.append(Error(*args, **kwargs))
 
@@ -83,8 +84,23 @@ class Integration:
 
     @property
     def disabled(self) -> str | None:
-        """List of disabled."""
+        """Return if integration is disabled."""
         return self.manifest.get("disabled")
+
+    @property
+    def name(self) -> str:
+        """Return name of the integration."""
+        return self.manifest["name"]
+
+    @property
+    def quality_scale(self) -> str:
+        """Return quality scale of the integration."""
+        return self.manifest.get("quality_scale")
+
+    @property
+    def config_flow(self) -> str:
+        """Return if the integration has a config flow."""
+        return self.manifest.get("config_flow")
 
     @property
     def requirements(self) -> list[str]:
@@ -96,11 +112,11 @@ class Integration:
         """List of dependencies."""
         return self.manifest.get("dependencies", [])
 
-    def add_error(self, *args, **kwargs):
+    def add_error(self, *args: Any, **kwargs: Any) -> None:
         """Add an error."""
         self.errors.append(Error(*args, **kwargs))
 
-    def add_warning(self, *args, **kwargs):
+    def add_warning(self, *args: Any, **kwargs: Any) -> None:
         """Add an warning."""
         self.warnings.append(Error(*args, **kwargs))
 

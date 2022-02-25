@@ -1,4 +1,6 @@
 """Test the Waze Travel Time config flow."""
+import pytest
+
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.components.waze_travel_time.const import (
     CONF_AVOID_FERRIES,
@@ -14,12 +16,15 @@ from homeassistant.components.waze_travel_time.const import (
     DEFAULT_NAME,
     DOMAIN,
 )
-from homeassistant.const import CONF_REGION, CONF_UNIT_SYSTEM_IMPERIAL
+from homeassistant.const import CONF_NAME, CONF_REGION, CONF_UNIT_SYSTEM_IMPERIAL
+
+from .const import MOCK_CONFIG
 
 from tests.common import MockConfigEntry
 
 
-async def test_minimum_fields(hass, validate_config_entry, bypass_setup):
+@pytest.mark.usefixtures("validate_config_entry")
+async def test_minimum_fields(hass):
     """Test we get the form."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -29,33 +34,25 @@ async def test_minimum_fields(hass, validate_config_entry, bypass_setup):
 
     result2 = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {
-            CONF_ORIGIN: "location1",
-            CONF_DESTINATION: "location2",
-            CONF_REGION: "US",
-        },
+        MOCK_CONFIG,
     )
     await hass.async_block_till_done()
 
     assert result2["type"] == data_entry_flow.RESULT_TYPE_CREATE_ENTRY
-    assert result2["title"] == f"{DEFAULT_NAME}: location1 -> location2"
+    assert result2["title"] == DEFAULT_NAME
     assert result2["data"] == {
+        CONF_NAME: DEFAULT_NAME,
         CONF_ORIGIN: "location1",
         CONF_DESTINATION: "location2",
         CONF_REGION: "US",
     }
 
 
-async def test_options(hass, validate_config_entry, mock_update):
+async def test_options(hass):
     """Test options flow."""
-
     entry = MockConfigEntry(
         domain=DOMAIN,
-        data={
-            CONF_ORIGIN: "location1",
-            CONF_DESTINATION: "location2",
-            CONF_REGION: "US",
-        },
+        data=MOCK_CONFIG,
     )
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
@@ -104,7 +101,8 @@ async def test_options(hass, validate_config_entry, mock_update):
     }
 
 
-async def test_import(hass, validate_config_entry, mock_update):
+@pytest.mark.usefixtures("validate_config_entry")
+async def test_import(hass):
     """Test import for config flow."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
@@ -144,8 +142,9 @@ async def test_import(hass, validate_config_entry, mock_update):
     }
 
 
-async def test_dupe_id(hass, validate_config_entry, bypass_setup):
-    """Test setting up the same entry twice fails."""
+@pytest.mark.usefixtures("validate_config_entry")
+async def test_dupe(hass):
+    """Test setting up the same entry data twice is OK."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
@@ -154,11 +153,7 @@ async def test_dupe_id(hass, validate_config_entry, bypass_setup):
 
     result2 = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {
-            CONF_ORIGIN: "location1",
-            CONF_DESTINATION: "location2",
-            CONF_REGION: "US",
-        },
+        MOCK_CONFIG,
     )
     await hass.async_block_till_done()
 
@@ -173,19 +168,15 @@ async def test_dupe_id(hass, validate_config_entry, bypass_setup):
 
     result2 = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {
-            CONF_ORIGIN: "location1",
-            CONF_DESTINATION: "location2",
-            CONF_REGION: "US",
-        },
+        MOCK_CONFIG,
     )
     await hass.async_block_till_done()
 
-    assert result2["type"] == data_entry_flow.RESULT_TYPE_ABORT
-    assert result2["reason"] == "already_configured"
+    assert result2["type"] == data_entry_flow.RESULT_TYPE_CREATE_ENTRY
 
 
-async def test_invalid_config_entry(hass, invalidate_config_entry):
+@pytest.mark.usefixtures("invalidate_config_entry")
+async def test_invalid_config_entry(hass):
     """Test we get the form."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
@@ -194,11 +185,7 @@ async def test_invalid_config_entry(hass, invalidate_config_entry):
     assert result["errors"] == {}
     result2 = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {
-            CONF_ORIGIN: "location1",
-            CONF_DESTINATION: "location2",
-            CONF_REGION: "US",
-        },
+        MOCK_CONFIG,
     )
 
     assert result2["type"] == data_entry_flow.RESULT_TYPE_FORM

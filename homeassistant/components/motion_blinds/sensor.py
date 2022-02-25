@@ -1,13 +1,12 @@
 """Support for Motion Blinds sensors."""
 from motionblinds import BlindType
 
-from homeassistant.components.sensor import SensorEntity
-from homeassistant.const import (
-    DEVICE_CLASS_BATTERY,
-    DEVICE_CLASS_SIGNAL_STRENGTH,
-    PERCENTAGE,
-    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
-)
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import PERCENTAGE, SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ATTR_AVAILABLE, DOMAIN, KEY_COORDINATOR, KEY_GATEWAY
@@ -17,9 +16,13 @@ TYPE_BLIND = "blind"
 TYPE_GATEWAY = "gateway"
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
     """Perform the setup for Motion Blinds."""
-    entities = []
+    entities: list[SensorEntity] = []
     motion_gateway = hass.data[DOMAIN][config_entry.entry_id][KEY_GATEWAY]
     coordinator = hass.data[DOMAIN][config_entry.entry_id][KEY_COORDINATOR]
 
@@ -40,32 +43,19 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 
 
 class MotionBatterySensor(CoordinatorEntity, SensorEntity):
-    """
-    Representation of a Motion Battery Sensor.
+    """Representation of a Motion Battery Sensor."""
 
-    Updates are done by the cover platform.
-    """
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_native_unit_of_measurement = PERCENTAGE
 
     def __init__(self, coordinator, blind):
         """Initialize the Motion Battery Sensor."""
         super().__init__(coordinator)
 
         self._blind = blind
-
-    @property
-    def unique_id(self):
-        """Return the unique id of the blind."""
-        return f"{self._blind.mac}-battery"
-
-    @property
-    def device_info(self):
-        """Return the device info of the blind."""
-        return {"identifiers": {(DOMAIN, self._blind.mac)}}
-
-    @property
-    def name(self):
-        """Return the name of the blind battery sensor."""
-        return f"{self._blind.blind_type}-battery-{self._blind.mac[12:]}"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, blind.mac)})
+        self._attr_name = f"{blind.blind_type}-battery-{blind.mac[12:]}"
+        self._attr_unique_id = f"{blind.mac}-battery"
 
     @property
     def available(self):
@@ -79,17 +69,7 @@ class MotionBatterySensor(CoordinatorEntity, SensorEntity):
         return self.coordinator.data[self._blind.mac][ATTR_AVAILABLE]
 
     @property
-    def unit_of_measurement(self):
-        """Return the unit of measurement of this entity, if any."""
-        return PERCENTAGE
-
-    @property
-    def device_class(self):
-        """Return the device class of this entity."""
-        return DEVICE_CLASS_BATTERY
-
-    @property
-    def state(self):
+    def native_value(self):
         """Return the state of the sensor."""
         return self._blind.battery_level
 
@@ -110,30 +90,18 @@ class MotionBatterySensor(CoordinatorEntity, SensorEntity):
 
 
 class MotionTDBUBatterySensor(MotionBatterySensor):
-    """
-    Representation of a Motion Battery Sensor for a Top Down Bottom Up blind.
-
-    Updates are done by the cover platform.
-    """
+    """Representation of a Motion Battery Sensor for a Top Down Bottom Up blind."""
 
     def __init__(self, coordinator, blind, motor):
         """Initialize the Motion Battery Sensor."""
         super().__init__(coordinator, blind)
 
         self._motor = motor
+        self._attr_unique_id = f"{blind.mac}-{motor}-battery"
+        self._attr_name = f"{blind.blind_type}-{motor}-battery-{blind.mac[12:]}"
 
     @property
-    def unique_id(self):
-        """Return the unique id of the blind."""
-        return f"{self._blind.mac}-{self._motor}-battery"
-
-    @property
-    def name(self):
-        """Return the name of the blind battery sensor."""
-        return f"{self._blind.blind_type}-{self._motor}-battery-{self._blind.mac[12:]}"
-
-    @property
-    def state(self):
+    def native_value(self):
         """Return the state of the sensor."""
         if self._blind.battery_level is None:
             return None
@@ -153,22 +121,19 @@ class MotionTDBUBatterySensor(MotionBatterySensor):
 class MotionSignalStrengthSensor(CoordinatorEntity, SensorEntity):
     """Representation of a Motion Signal Strength Sensor."""
 
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_entity_registry_enabled_default = False
+    _attr_native_unit_of_measurement = SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
     def __init__(self, coordinator, device, device_type):
         """Initialize the Motion Signal Strength Sensor."""
         super().__init__(coordinator)
 
         self._device = device
         self._device_type = device_type
-
-    @property
-    def unique_id(self):
-        """Return the unique id of the blind."""
-        return f"{self._device.mac}-RSSI"
-
-    @property
-    def device_info(self):
-        """Return the device info of the blind."""
-        return {"identifiers": {(DOMAIN, self._device.mac)}}
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device.mac)})
+        self._attr_unique_id = f"{device.mac}-RSSI"
 
     @property
     def name(self):
@@ -193,22 +158,7 @@ class MotionSignalStrengthSensor(CoordinatorEntity, SensorEntity):
         )
 
     @property
-    def unit_of_measurement(self):
-        """Return the unit of measurement of this entity, if any."""
-        return SIGNAL_STRENGTH_DECIBELS_MILLIWATT
-
-    @property
-    def device_class(self):
-        """Return the device class of this entity."""
-        return DEVICE_CLASS_SIGNAL_STRENGTH
-
-    @property
-    def entity_registry_enabled_default(self):
-        """Return if the entity should be enabled when first added to the entity registry."""
-        return False
-
-    @property
-    def state(self):
+    def native_value(self):
         """Return the state of the sensor."""
         return self._device.RSSI
 

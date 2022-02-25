@@ -1,4 +1,6 @@
 """Support for Radio Thermostat wifi-enabled home thermostats."""
+from __future__ import annotations
+
 import logging
 from socket import timeout
 
@@ -29,7 +31,10 @@ from homeassistant.const import (
     STATE_ON,
     TEMP_FAHRENHEIT,
 )
+from homeassistant.core import HomeAssistant
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
@@ -80,6 +85,8 @@ PRESET_MODE_TO_CODE = {"home": 0, "alternate": 1, "away": 2, "holiday": 3}
 
 CODE_TO_PRESET_MODE = {0: "home", 1: "alternate", 2: "away", 3: "holiday"}
 
+CODE_TO_HOLD_STATE = {0: False, 1: True}
+
 
 def round_temp(temperature):
     """Round a temperature to the resolution of the thermostat.
@@ -101,7 +108,12 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 SUPPORT_FLAGS = SUPPORT_TARGET_TEMPERATURE | SUPPORT_FAN_MODE | SUPPORT_PRESET_MODE
 
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
+def setup_platform(
+    hass: HomeAssistant,
+    config: ConfigType,
+    add_entities: AddEntitiesCallback,
+    discovery_info: DiscoveryInfoType | None = None,
+) -> None:
     """Set up the Radio Thermostat."""
     hosts = []
     if CONF_HOST in config:
@@ -199,8 +211,7 @@ class RadioThermostat(ClimateEntity):
 
     def set_fan_mode(self, fan_mode):
         """Turn fan on/off."""
-        code = FAN_MODE_TO_CODE.get(fan_mode)
-        if code is not None:
+        if (code := FAN_MODE_TO_CODE.get(fan_mode)) is not None:
             self.device.fmode = code
 
     @property
@@ -300,6 +311,7 @@ class RadioThermostat(ClimateEntity):
             self._fstate = CODE_TO_FAN_STATE[data["fstate"]]
             self._tmode = CODE_TO_TEMP_MODE[data["tmode"]]
             self._tstate = CODE_TO_TEMP_STATE[data["tstate"]]
+            self._hold_set = CODE_TO_HOLD_STATE[data["hold"]]
 
             self._current_operation = self._tmode
             if self._tmode == HVAC_MODE_COOL:
@@ -319,8 +331,7 @@ class RadioThermostat(ClimateEntity):
 
     def set_temperature(self, **kwargs):
         """Set new target temperature."""
-        temperature = kwargs.get(ATTR_TEMPERATURE)
-        if temperature is None:
+        if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
             return
 
         temperature = round_temp(temperature)
@@ -368,7 +379,7 @@ class RadioThermostat(ClimateEntity):
 
     def set_preset_mode(self, preset_mode):
         """Set Preset mode (Home, Alternate, Away, Holiday)."""
-        if preset_mode in (PRESET_MODES):
+        if preset_mode in PRESET_MODES:
             self.device.program_mode = PRESET_MODE_TO_CODE[preset_mode]
         else:
             _LOGGER.error(

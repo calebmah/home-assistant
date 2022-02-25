@@ -12,7 +12,7 @@ from homeassistant.components.directv.media_player import (
     ATTR_MEDIA_RECORDED,
     ATTR_MEDIA_START_TIME,
 )
-from homeassistant.components.media_player import DEVICE_CLASS_RECEIVER
+from homeassistant.components.media_player import MediaPlayerDeviceClass
 from homeassistant.components.media_player.const import (
     ATTR_INPUT_SOURCE,
     ATTR_MEDIA_ALBUM_NAME,
@@ -54,8 +54,8 @@ from homeassistant.const import (
     STATE_PLAYING,
     STATE_UNAVAILABLE,
 )
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.typing import HomeAssistantType
 from homeassistant.util import dt as dt_util
 
 from tests.components.directv import setup_integration
@@ -78,44 +78,38 @@ def mock_now() -> datetime:
     return dt_util.utcnow()
 
 
-async def async_turn_on(hass: HomeAssistantType, entity_id: str | None = None) -> None:
+async def async_turn_on(hass: HomeAssistant, entity_id: str | None = None) -> None:
     """Turn on specified media player or all."""
     data = {ATTR_ENTITY_ID: entity_id} if entity_id else {}
     await hass.services.async_call(MP_DOMAIN, SERVICE_TURN_ON, data)
 
 
-async def async_turn_off(hass: HomeAssistantType, entity_id: str | None = None) -> None:
+async def async_turn_off(hass: HomeAssistant, entity_id: str | None = None) -> None:
     """Turn off specified media player or all."""
     data = {ATTR_ENTITY_ID: entity_id} if entity_id else {}
     await hass.services.async_call(MP_DOMAIN, SERVICE_TURN_OFF, data)
 
 
-async def async_media_pause(
-    hass: HomeAssistantType, entity_id: str | None = None
-) -> None:
+async def async_media_pause(hass: HomeAssistant, entity_id: str | None = None) -> None:
     """Send the media player the command for pause."""
     data = {ATTR_ENTITY_ID: entity_id} if entity_id else {}
     await hass.services.async_call(MP_DOMAIN, SERVICE_MEDIA_PAUSE, data)
 
 
-async def async_media_play(
-    hass: HomeAssistantType, entity_id: str | None = None
-) -> None:
+async def async_media_play(hass: HomeAssistant, entity_id: str | None = None) -> None:
     """Send the media player the command for play/pause."""
     data = {ATTR_ENTITY_ID: entity_id} if entity_id else {}
     await hass.services.async_call(MP_DOMAIN, SERVICE_MEDIA_PLAY, data)
 
 
-async def async_media_stop(
-    hass: HomeAssistantType, entity_id: str | None = None
-) -> None:
+async def async_media_stop(hass: HomeAssistant, entity_id: str | None = None) -> None:
     """Send the media player the command for stop."""
     data = {ATTR_ENTITY_ID: entity_id} if entity_id else {}
     await hass.services.async_call(MP_DOMAIN, SERVICE_MEDIA_STOP, data)
 
 
 async def async_media_next_track(
-    hass: HomeAssistantType, entity_id: str | None = None
+    hass: HomeAssistant, entity_id: str | None = None
 ) -> None:
     """Send the media player the command for next track."""
     data = {ATTR_ENTITY_ID: entity_id} if entity_id else {}
@@ -123,7 +117,7 @@ async def async_media_next_track(
 
 
 async def async_media_previous_track(
-    hass: HomeAssistantType, entity_id: str | None = None
+    hass: HomeAssistant, entity_id: str | None = None
 ) -> None:
     """Send the media player the command for prev track."""
     data = {ATTR_ENTITY_ID: entity_id} if entity_id else {}
@@ -131,7 +125,7 @@ async def async_media_previous_track(
 
 
 async def async_play_media(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     media_type: str,
     media_id: str,
     entity_id: str | None = None,
@@ -149,9 +143,7 @@ async def async_play_media(
     await hass.services.async_call(MP_DOMAIN, SERVICE_PLAY_MEDIA, data)
 
 
-async def test_setup(
-    hass: HomeAssistantType, aioclient_mock: AiohttpClientMocker
-) -> None:
+async def test_setup(hass: HomeAssistant, aioclient_mock: AiohttpClientMocker) -> None:
     """Test setup with basic config."""
     await setup_integration(hass, aioclient_mock)
     assert hass.states.get(MAIN_ENTITY_ID)
@@ -160,7 +152,7 @@ async def test_setup(
 
 
 async def test_unique_id(
-    hass: HomeAssistantType, aioclient_mock: AiohttpClientMocker
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
 ) -> None:
     """Test unique id."""
     await setup_integration(hass, aioclient_mock)
@@ -168,20 +160,20 @@ async def test_unique_id(
     entity_registry = er.async_get(hass)
 
     main = entity_registry.async_get(MAIN_ENTITY_ID)
-    assert main.device_class == DEVICE_CLASS_RECEIVER
+    assert main.original_device_class == MediaPlayerDeviceClass.RECEIVER
     assert main.unique_id == "028877455858"
 
     client = entity_registry.async_get(CLIENT_ENTITY_ID)
-    assert client.device_class == DEVICE_CLASS_RECEIVER
+    assert client.original_device_class == MediaPlayerDeviceClass.RECEIVER
     assert client.unique_id == "2CA17D1CD30X"
 
     unavailable_client = entity_registry.async_get(UNAVAILABLE_ENTITY_ID)
-    assert unavailable_client.device_class == DEVICE_CLASS_RECEIVER
+    assert unavailable_client.original_device_class == MediaPlayerDeviceClass.RECEIVER
     assert unavailable_client.unique_id == "9XXXXXXXXXX9"
 
 
 async def test_supported_features(
-    hass: HomeAssistantType, aioclient_mock: AiohttpClientMocker
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
 ) -> None:
     """Test supported features."""
     await setup_integration(hass, aioclient_mock)
@@ -214,7 +206,7 @@ async def test_supported_features(
 
 
 async def test_check_attributes(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     mock_now: dt_util.dt.datetime,
     aioclient_mock: AiohttpClientMocker,
 ) -> None:
@@ -321,7 +313,7 @@ async def test_check_attributes(
 
 
 async def test_attributes_paused(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     mock_now: dt_util.dt.datetime,
     aioclient_mock: AiohttpClientMocker,
 ):
@@ -345,7 +337,7 @@ async def test_attributes_paused(
 
 
 async def test_main_services(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     mock_now: dt_util.dt.datetime,
     aioclient_mock: AiohttpClientMocker,
 ) -> None:

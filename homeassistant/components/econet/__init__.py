@@ -1,5 +1,4 @@
 """Support for EcoNet products."""
-import asyncio
 from datetime import timedelta
 import logging
 
@@ -13,24 +12,31 @@ from pyeconet.errors import (
     PyeconetError,
 )
 
-from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, TEMP_FAHRENHEIT
-from homeassistant.core import callback
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_EMAIL, CONF_PASSWORD, TEMP_FAHRENHEIT, Platform
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.dispatcher import dispatcher_send
-from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity import DeviceInfo, Entity
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.typing import ConfigType
 
 from .const import API_CLIENT, DOMAIN, EQUIPMENT
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["climate", "binary_sensor", "sensor", "water_heater"]
+PLATFORMS = [
+    Platform.CLIMATE,
+    Platform.BINARY_SENSOR,
+    Platform.SENSOR,
+    Platform.WATER_HEATER,
+]
 PUSH_UPDATE = "econet.push_update"
 
 INTERVAL = timedelta(minutes=60)
 
 
-async def async_setup(hass, config):
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the EcoNet component."""
     hass.data[DOMAIN] = {}
     hass.data[DOMAIN][API_CLIENT] = {}
@@ -38,7 +44,7 @@ async def async_setup(hass, config):
     return True
 
 
-async def async_setup_entry(hass, config_entry):
+async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Set up EcoNet as config entry."""
 
     email = config_entry.data[CONF_EMAIL]
@@ -62,10 +68,7 @@ async def async_setup_entry(hass, config_entry):
     hass.data[DOMAIN][API_CLIENT][config_entry.entry_id] = api
     hass.data[DOMAIN][EQUIPMENT][config_entry.entry_id] = equipment
 
-    for platform in PLATFORMS:
-        hass.async_create_task(
-            hass.config_entries.async_forward_entry_setup(config_entry, platform)
-        )
+    hass.config_entries.async_setup_platforms(config_entry, PLATFORMS)
 
     api.subscribe()
 
@@ -88,25 +91,21 @@ async def async_setup_entry(hass, config_entry):
         """Fetch the latest changes from the API."""
         await api.refresh_equipment()
 
-    async_track_time_interval(hass, resubscribe, INTERVAL)
-    async_track_time_interval(hass, fetch_update, INTERVAL + timedelta(minutes=1))
+    config_entry.async_on_unload(async_track_time_interval(hass, resubscribe, INTERVAL))
+    config_entry.async_on_unload(
+        async_track_time_interval(hass, fetch_update, INTERVAL + timedelta(minutes=1))
+    )
 
     return True
 
 
-async def async_unload_entry(hass, entry):
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a EcoNet config entry."""
-    tasks = [
-        hass.config_entries.async_forward_entry_unload(entry, platform)
-        for platform in PLATFORMS
-    ]
-
-    await asyncio.gather(*tasks)
-
-    hass.data[DOMAIN][API_CLIENT].pop(entry.entry_id)
-    hass.data[DOMAIN][EQUIPMENT].pop(entry.entry_id)
-
-    return True
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        hass.data[DOMAIN][API_CLIENT].pop(entry.entry_id)
+        hass.data[DOMAIN][EQUIPMENT].pop(entry.entry_id)
+    return unload_ok
 
 
 class EcoNetEntity(Entity):
@@ -136,13 +135,13 @@ class EcoNetEntity(Entity):
         return self._econet.connected
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return device registry information for this entity."""
-        return {
-            "identifiers": {(DOMAIN, self._econet.device_id)},
-            "manufacturer": "Rheem",
-            "name": self._econet.device_name,
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._econet.device_id)},
+            manufacturer="Rheem",
+            name=self._econet.device_name,
+        )
 
     @property
     def name(self):

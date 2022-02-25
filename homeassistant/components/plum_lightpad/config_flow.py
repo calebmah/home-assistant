@@ -10,7 +10,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-from homeassistant.helpers.typing import ConfigType
+from homeassistant.data_entry_flow import FlowResult
 
 from .const import DOMAIN
 from .utils import load_plum
@@ -36,8 +36,8 @@ class PlumLightpadConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_user(
-        self, user_input: ConfigType | None = None
-    ) -> dict[str, Any]:
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
         """Handle a flow initialized by the user or redirected to by import."""
         if not user_input:
             return self._show_form()
@@ -60,7 +60,7 @@ class PlumLightpadConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_import(
-        self, import_config: ConfigType | None
-    ) -> dict[str, Any]:
+        self, import_config: dict[str, Any] | None
+    ) -> FlowResult:
         """Import a config entry from configuration.yaml."""
         return await self.async_step_user(import_config)

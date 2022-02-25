@@ -1,5 +1,4 @@
 """Remote control support for Apple TV."""
-
 import asyncio
 import logging
 
@@ -9,7 +8,10 @@ from homeassistant.components.remote import (
     DEFAULT_DELAY_SECS,
     RemoteEntity,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import AppleTVEntity
 from .const import DOMAIN
@@ -19,7 +21,11 @@ _LOGGER = logging.getLogger(__name__)
 PARALLEL_UPDATES = 0
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
     """Load Apple TV remote based on a config entry."""
     name = config_entry.data[CONF_NAME]
     manager = hass.data[DOMAIN][config_entry.unique_id]
@@ -33,11 +39,6 @@ class AppleTVRemote(AppleTVEntity, RemoteEntity):
     def is_on(self):
         """Return true if device is on."""
         return self.atv is not None
-
-    @property
-    def should_poll(self):
-        """No polling needed for Apple TV."""
-        return False
 
     async def async_turn_on(self, **kwargs):
         """Turn the device on."""
@@ -53,7 +54,7 @@ class AppleTVRemote(AppleTVEntity, RemoteEntity):
         delay = kwargs.get(ATTR_DELAY_SECS, DEFAULT_DELAY_SECS)
 
         if not self.is_on:
-            _LOGGER.error("Unable to send commands, not connected to %s", self._name)
+            _LOGGER.error("Unable to send commands, not connected to %s", self.name)
             return
 
         for _ in range(num_repeats):

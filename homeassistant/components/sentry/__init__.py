@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+from types import MappingProxyType
+from typing import Any
 
 import sentry_sdk
 from sentry_sdk.integrations.aiohttp import AioHttpIntegration
@@ -15,6 +17,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv, entity_platform
+from homeassistant.helpers.event import async_call_later
 from homeassistant.loader import Integration, async_get_custom_components
 
 from .const import (
@@ -34,7 +37,7 @@ from .const import (
     ENTITY_COMPONENTS,
 )
 
-CONFIG_SCHEMA = cv.deprecated(DOMAIN)
+CONFIG_SCHEMA = cv.removed(DOMAIN, raise_if_present=False)
 
 
 LOGGER_INFO_REGEX = re.compile(r"^(\w+)\.?(\w+)?\.?(\w+)?\.?(\w+)?(?:\..*)?$")
@@ -76,7 +79,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             ),
         }
 
-    sentry_sdk.init(
+    sentry_sdk.init(  # pylint: disable=abstract-class-instantiated
         dsn=entry.data[CONF_DSN],
         environment=entry.options.get(CONF_ENVIRONMENT),
         integrations=[sentry_logging, AioHttpIntegration(), SqlalchemyIntegration()],
@@ -99,7 +102,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         system_info = await hass.helpers.system_info.async_get_system_info()
 
         # Update system info every hour
-        hass.helpers.event.async_call_later(3600, update_system_info)
+        async_call_later(hass, 3600, update_system_info)
 
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, update_system_info)
 
@@ -119,19 +122,19 @@ def get_channel(version: str) -> str:
 
 def process_before_send(
     hass: HomeAssistant,
-    options,
+    options: MappingProxyType[str, Any],
     channel: str,
     huuid: str,
     system_info: dict[str, bool | str],
     custom_components: dict[str, Integration],
-    event,
-    hint,
+    event: dict[str, Any],
+    hint: dict[str, Any],
 ):
     """Process a Sentry event before sending it to Sentry."""
     # Filter out handled events by default
     if (
         "tags" in event
-        and event.tags.get("handled", "no") == "yes"
+        and event["tags"].get("handled", "no") == "yes"
         and not options.get(CONF_EVENT_HANDLED)
     ):
         return None
@@ -152,8 +155,7 @@ def process_before_send(
     ]
 
     # Add additional tags based on what caused the event.
-    platform = entity_platform.current_platform.get()
-    if platform is not None:
+    if (platform := entity_platform.current_platform.get()) is not None:
         # This event happened in a platform
         additional_tags["custom_component"] = "no"
         additional_tags["integration"] = platform.platform_name
@@ -203,7 +205,7 @@ def process_before_send(
                 "channel": channel,
                 "custom_components": "\n".join(sorted(custom_components)),
                 "integrations": "\n".join(sorted(integrations)),
-                **system_info,
+                **system_info,  # type: ignore[arg-type]
             },
         }
     )

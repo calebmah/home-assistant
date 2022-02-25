@@ -1,8 +1,15 @@
 """Support for Waterfurnace."""
+from __future__ import annotations
 
-from homeassistant.components.sensor import ENTITY_ID_FORMAT, SensorEntity
+from homeassistant.components.sensor import (
+    ENTITY_ID_FORMAT,
+    SensorDeviceClass,
+    SensorEntity,
+)
 from homeassistant.const import PERCENTAGE, POWER_WATT, TEMP_FAHRENHEIT
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 from homeassistant.util import slugify
 
 from . import DOMAIN as WF_DOMAIN, UPDATE_TOPIC
@@ -12,9 +19,15 @@ class WFSensorConfig:
     """Water Furnace Sensor configuration."""
 
     def __init__(
-        self, friendly_name, field, icon="mdi:gauge", unit_of_measurement=None
+        self,
+        friendly_name,
+        field,
+        icon="mdi:gauge",
+        unit_of_measurement=None,
+        device_class=None,
     ):
         """Initialize configuration."""
+        self.device_class = device_class
         self.friendly_name = friendly_name
         self.field = field
         self.icon = icon
@@ -25,13 +38,27 @@ SENSORS = [
     WFSensorConfig("Furnace Mode", "mode"),
     WFSensorConfig("Total Power", "totalunitpower", "mdi:flash", POWER_WATT),
     WFSensorConfig(
-        "Active Setpoint", "tstatactivesetpoint", "mdi:thermometer", TEMP_FAHRENHEIT
+        "Active Setpoint",
+        "tstatactivesetpoint",
+        None,
+        TEMP_FAHRENHEIT,
+        SensorDeviceClass.TEMPERATURE,
     ),
-    WFSensorConfig("Leaving Air", "leavingairtemp", "mdi:thermometer", TEMP_FAHRENHEIT),
-    WFSensorConfig("Room Temp", "tstatroomtemp", "mdi:thermometer", TEMP_FAHRENHEIT),
     WFSensorConfig(
-        "Loop Temp", "enteringwatertemp", "mdi:thermometer", TEMP_FAHRENHEIT
+        "Leaving Air",
+        "leavingairtemp",
+        None,
+        TEMP_FAHRENHEIT,
+        SensorDeviceClass.TEMPERATURE,
     ),
+    WFSensorConfig(
+        "Room Temp",
+        "tstatroomtemp",
+        None,
+        TEMP_FAHRENHEIT,
+        SensorDeviceClass.TEMPERATURE,
+    ),
+    WFSensorConfig("Loop Temp", "enteringwatertemp", None, TEMP_FAHRENHEIT),
     WFSensorConfig(
         "Humidity Set Point", "tstathumidsetpoint", "mdi:water-percent", PERCENTAGE
     ),
@@ -47,7 +74,12 @@ SENSORS = [
 ]
 
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
+def setup_platform(
+    hass: HomeAssistant,
+    config: ConfigType,
+    add_entities: AddEntitiesCallback,
+    discovery_info: DiscoveryInfoType | None = None,
+) -> None:
     """Set up the Waterfurnace sensor."""
     if discovery_info is None:
         return
@@ -71,6 +103,7 @@ class WaterFurnaceSensor(SensorEntity):
         self._state = None
         self._icon = config.icon
         self._unit_of_measurement = config.unit_of_measurement
+        self._attr_device_class = config.device_class
 
         # This ensures that the sensors are isolated per waterfurnace unit
         self.entity_id = ENTITY_ID_FORMAT.format(
@@ -83,7 +116,7 @@ class WaterFurnaceSensor(SensorEntity):
         return self._name
 
     @property
-    def state(self):
+    def native_value(self):
         """Return the state of the sensor."""
         return self._state
 
@@ -93,7 +126,7 @@ class WaterFurnaceSensor(SensorEntity):
         return self._icon
 
     @property
-    def unit_of_measurement(self):
+    def native_unit_of_measurement(self):
         """Return the units of measurement."""
         return self._unit_of_measurement
 

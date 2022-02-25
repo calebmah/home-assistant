@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, cast
+from typing import Any, cast
 
 import voluptuous as vol
 
@@ -30,6 +30,7 @@ from homeassistant.helpers import (
     service,
     storage,
 )
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import bind_hass
 from homeassistant.util.location import distance
 
@@ -121,7 +122,7 @@ def async_active_zone(
             continue
 
         within_zone = zone_dist - radius < zone.attributes[ATTR_RADIUS]
-        closer_zone = closest is None or zone_dist < min_dist  # type: ignore
+        closer_zone = closest is None or zone_dist < min_dist  # type: ignore[unreachable]
         smaller_zone = (
             zone_dist == min_dist
             and zone.attributes[ATTR_RADIUS]
@@ -163,7 +164,7 @@ class ZoneStorageCollection(collection.StorageCollection):
 
     async def _process_create_data(self, data: dict) -> dict:
         """Validate the config is valid."""
-        return cast(Dict, self.CREATE_SCHEMA(data))
+        return cast(dict, self.CREATE_SCHEMA(data))
 
     @callback
     def _get_suggested_id(self, info: dict) -> str:
@@ -176,7 +177,7 @@ class ZoneStorageCollection(collection.StorageCollection):
         return {**data, **update_data}
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up configured zones as well as Home Assistant zone if necessary."""
     component = entity_component.EntityComponent(_LOGGER, DOMAIN, hass)
     id_manager = collection.IDManager()
@@ -279,11 +280,10 @@ async def async_unload_entry(
 class Zone(entity.Entity):
     """Representation of a Zone."""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict) -> None:
         """Initialize the zone."""
         self._config = config
         self.editable = True
-        self._attrs: dict | None = None
         self._generate_attrs()
 
     @classmethod
@@ -291,7 +291,7 @@ class Zone(entity.Entity):
         """Return entity instance initialized from yaml storage."""
         zone = cls(config)
         zone.editable = False
-        zone._generate_attrs()  # pylint:disable=protected-access
+        zone._generate_attrs()
         return zone
 
     @property
@@ -315,11 +315,6 @@ class Zone(entity.Entity):
         return self._config.get(CONF_ICON)
 
     @property
-    def extra_state_attributes(self) -> dict | None:
-        """Return the state attributes of the zone."""
-        return self._attrs
-
-    @property
     def should_poll(self) -> bool:
         """Zone does not poll."""
         return False
@@ -335,7 +330,7 @@ class Zone(entity.Entity):
     @callback
     def _generate_attrs(self) -> None:
         """Generate new attrs based on config."""
-        self._attrs = {
+        self._attr_extra_state_attributes = {
             ATTR_LATITUDE: self._config[CONF_LATITUDE],
             ATTR_LONGITUDE: self._config[CONF_LONGITUDE],
             ATTR_RADIUS: self._config[CONF_RADIUS],

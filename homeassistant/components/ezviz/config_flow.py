@@ -1,11 +1,18 @@
 """Config flow for ezviz."""
 import logging
 
-from pyezviz.client import EzvizClient, HTTPError, InvalidURL, PyEzvizError
-from pyezviz.test_cam_rtsp import AuthTestResultFailed, InvalidHost, TestRTSPAuth
+from pyezviz.client import EzvizClient
+from pyezviz.exceptions import (
+    AuthTestResultFailed,
+    HTTPError,
+    InvalidHost,
+    InvalidURL,
+    PyEzvizError,
+)
+from pyezviz.test_cam_rtsp import TestRTSPAuth
 import voluptuous as vol
 
-from homeassistant.config_entries import CONN_CLASS_CLOUD_POLL, ConfigFlow, OptionsFlow
+from homeassistant.config_entries import ConfigFlow, OptionsFlow
 from homeassistant.const import (
     CONF_CUSTOMIZE,
     CONF_IP_ADDRESS,
@@ -61,7 +68,6 @@ class EzvizConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Ezviz."""
 
     VERSION = 1
-    CONNECTION_CLASS = CONN_CLASS_CLOUD_POLL
 
     async def _validate_and_create_auth(self, data):
         """Try to login to ezviz cloud account and create entry if successful."""
@@ -128,7 +134,7 @@ class EzvizConfigFlow(ConfigFlow, domain=DOMAIN):
         except PyEzvizError as err:
             raise PyEzvizError from err
 
-        # Secondly try to wake hybernating camera.
+        # Secondly try to wake hibernating camera.
         try:
             await self.hass.async_add_executor_job(
                 ezviz_client.get_detection_sensibility, data[ATTR_SERIAL]
@@ -253,7 +259,7 @@ class EzvizConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user_custom_url", data_schema=data_schema_custom_url, errors=errors
         )
 
-    async def async_step_discovery(self, discovery_info):
+    async def async_step_integration_discovery(self, discovery_info):
         """Handle a flow for discovered camera without rtsp config entry."""
 
         await self.async_set_unique_id(discovery_info[ATTR_SERIAL])

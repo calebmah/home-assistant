@@ -29,15 +29,20 @@ from homeassistant.components.climate.const import (
     SUPPORT_TARGET_TEMPERATURE,
     SUPPORT_TARGET_TEMPERATURE_RANGE,
 )
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     ATTR_TEMPERATURE,
+    PRECISION_HALVES,
     PRECISION_TENTHS,
     STATE_ON,
     TEMP_FAHRENHEIT,
 )
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import entity_platform
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util.temperature import convert
 
 from .const import _LOGGER, DOMAIN, ECOBEE_MODEL_TO_NAME, MANUFACTURER
@@ -172,66 +177,83 @@ SUPPORT_FLAGS = (
 )
 
 
-async def async_setup_entry(hass, config_entry, async_add_entities):
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
     """Set up the ecobee thermostat."""
 
     data = hass.data[DOMAIN]
+    entities = []
 
-    devices = [Thermostat(data, index) for index in range(len(data.ecobee.thermostats))]
+    for index in range(len(data.ecobee.thermostats)):
+        thermostat = data.ecobee.get_thermostat(index)
+        if not thermostat["modelNumber"] in ECOBEE_MODEL_TO_NAME:
+            _LOGGER.error(
+                "Model number for ecobee thermostat %s not recognized. "
+                "Please visit this link to open a new issue: "
+                "https://github.com/home-assistant/core/issues "
+                "and include the following information: "
+                "Unrecognized model number: %s",
+                thermostat["name"],
+                thermostat["modelNumber"],
+            )
+        entities.append(Thermostat(data, index, thermostat))
 
-    async_add_entities(devices, True)
+    async_add_entities(entities, True)
 
-    platform = entity_platform.current_platform.get()
+    platform = entity_platform.async_get_current_platform()
 
-    def create_vacation_service(service):
+    def create_vacation_service(service: ServiceCall) -> None:
         """Create a vacation on the target thermostat."""
         entity_id = service.data[ATTR_ENTITY_ID]
 
-        for thermostat in devices:
+        for thermostat in entities:
             if thermostat.entity_id == entity_id:
                 thermostat.create_vacation(service.data)
                 thermostat.schedule_update_ha_state(True)
                 break
 
-    def delete_vacation_service(service):
+    def delete_vacation_service(service: ServiceCall) -> None:
         """Delete a vacation on the target thermostat."""
         entity_id = service.data[ATTR_ENTITY_ID]
         vacation_name = service.data[ATTR_VACATION_NAME]
 
-        for thermostat in devices:
+        for thermostat in entities:
             if thermostat.entity_id == entity_id:
                 thermostat.delete_vacation(vacation_name)
                 thermostat.schedule_update_ha_state(True)
                 break
 
-    def fan_min_on_time_set_service(service):
+    def fan_min_on_time_set_service(service: ServiceCall) -> None:
         """Set the minimum fan on time on the target thermostats."""
         entity_id = service.data.get(ATTR_ENTITY_ID)
         fan_min_on_time = service.data[ATTR_FAN_MIN_ON_TIME]
 
         if entity_id:
             target_thermostats = [
-                device for device in devices if device.entity_id in entity_id
+                entity for entity in entities if entity.entity_id in entity_id
             ]
         else:
-            target_thermostats = devices
+            target_thermostats = entities
 
         for thermostat in target_thermostats:
             thermostat.set_fan_min_on_time(str(fan_min_on_time))
 
             thermostat.schedule_update_ha_state(True)
 
-    def resume_program_set_service(service):
+    def resume_program_set_service(service: ServiceCall) -> None:
         """Resume the program on the target thermostats."""
         entity_id = service.data.get(ATTR_ENTITY_ID)
         resume_all = service.data.get(ATTR_RESUME_ALL)
 
         if entity_id:
             target_thermostats = [
-                device for device in devices if device.entity_id in entity_id
+                entity for entity in entities if entity.entity_id in entity_id
             ]
         else:
-            target_thermostats = devices
+            target_thermostats = entities
 
         for thermostat in target_thermostats:
             thermostat.resume_program(resume_all)
@@ -291,11 +313,11 @@ async def async_setup_entry(hass, config_entry, async_add_entities):
 class Thermostat(ClimateEntity):
     """A thermostat class for Ecobee."""
 
-    def __init__(self, data, thermostat_index):
+    def __init__(self, data, thermostat_index, thermostat):
         """Initialize the thermostat."""
         self.data = data
         self.thermostat_index = thermostat_index
-        self.thermostat = self.data.ecobee.get_thermostat(self.thermostat_index)
+        self.thermostat = thermostat
         self._name = self.thermostat["name"]
         self.vacation = None
         self._last_active_hvac_mode = HVAC_MODE_HEAT_COOL
@@ -353,27 +375,21 @@ class Thermostat(ClimateEntity):
         return self.thermostat["identifier"]
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo:
         """Return device information for this ecobee thermostat."""
+        model: str | None
         try:
             model = f"{ECOBEE_MODEL_TO_NAME[self.thermostat['modelNumber']]} Thermostat"
         except KeyError:
-            _LOGGER.error(
-                "Model number for ecobee thermostat %s not recognized. "
-                "Please visit this link and provide the following information: "
-                "https://github.com/home-assistant/core/issues/27172 "
-                "Unrecognized model number: %s",
-                self.name,
-                self.thermostat["modelNumber"],
-            )
-            return None
+            # Ecobee model is not in our list
+            model = None
 
-        return {
-            "identifiers": {(DOMAIN, self.thermostat["identifier"])},
-            "name": self.name,
-            "manufacturer": MANUFACTURER,
-            "model": model,
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.thermostat["identifier"])},
+            manufacturer=MANUFACTURER,
+            model=model,
+            name=self.name,
+        )
 
     @property
     def temperature_unit(self):
@@ -386,23 +402,28 @@ class Thermostat(ClimateEntity):
         return PRECISION_TENTHS
 
     @property
-    def current_temperature(self):
+    def current_temperature(self) -> float:
         """Return the current temperature."""
         return self.thermostat["runtime"]["actualTemperature"] / 10.0
 
     @property
-    def target_temperature_low(self):
+    def target_temperature_low(self) -> float | None:
         """Return the lower bound temperature we try to reach."""
         if self.hvac_mode == HVAC_MODE_HEAT_COOL:
-            return round(self.thermostat["runtime"]["desiredHeat"] / 10.0)
+            return self.thermostat["runtime"]["desiredHeat"] / 10.0
         return None
 
     @property
-    def target_temperature_high(self):
+    def target_temperature_high(self) -> float | None:
         """Return the upper bound temperature we try to reach."""
         if self.hvac_mode == HVAC_MODE_HEAT_COOL:
-            return round(self.thermostat["runtime"]["desiredCool"] / 10.0)
+            return self.thermostat["runtime"]["desiredCool"] / 10.0
         return None
+
+    @property
+    def target_temperature_step(self) -> float:
+        """Set target temperature step to halves."""
+        return PRECISION_HALVES
 
     @property
     def has_humidifier_control(self):
@@ -430,14 +451,14 @@ class Thermostat(ClimateEntity):
         return DEFAULT_MAX_HUMIDITY
 
     @property
-    def target_temperature(self):
+    def target_temperature(self) -> float | None:
         """Return the temperature we try to reach."""
         if self.hvac_mode == HVAC_MODE_HEAT_COOL:
             return None
         if self.hvac_mode == HVAC_MODE_HEAT:
-            return round(self.thermostat["runtime"]["desiredHeat"] / 10.0)
+            return self.thermostat["runtime"]["desiredHeat"] / 10.0
         if self.hvac_mode == HVAC_MODE_COOL:
-            return round(self.thermostat["runtime"]["desiredCool"] / 10.0)
+            return self.thermostat["runtime"]["desiredCool"] / 10.0
         return None
 
     @property
@@ -500,7 +521,7 @@ class Thermostat(ClimateEntity):
         """Return current HVAC action.
 
         Ecobee returns a CSV string with different equipment that is active.
-        We are prioritizing any heating/cooling equipment, otherwase look at
+        We are prioritizing any heating/cooling equipment, otherwise look at
         drying/fanning. Idle if nothing going on.
 
         We are unable to map all actions to HA equivalents.
@@ -670,11 +691,11 @@ class Thermostat(ClimateEntity):
         heatCoolMinDelta property.
         https://www.ecobee.com/home/developer/api/examples/ex5.shtml
         """
-        if self.hvac_mode == HVAC_MODE_HEAT or self.hvac_mode == HVAC_MODE_COOL:
+        if self.hvac_mode in (HVAC_MODE_HEAT, HVAC_MODE_COOL):
             heat_temp = temp
             cool_temp = temp
         else:
-            delta = self.thermostat["settings"]["heatCoolMinDelta"] / 10
+            delta = self.thermostat["settings"]["heatCoolMinDelta"] / 10.0
             heat_temp = temp - delta
             cool_temp = temp + delta
         self.set_auto_temp_hold(heat_temp, cool_temp)

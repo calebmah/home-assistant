@@ -1,17 +1,17 @@
 """Support for KNX/IP covers."""
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
+from xknx import XKNX
 from xknx.devices import Cover as XknxCover, Device as XknxDevice
 
+from homeassistant import config_entries
 from homeassistant.components.cover import (
     ATTR_POSITION,
     ATTR_TILT_POSITION,
-    DEVICE_CLASS_BLIND,
-    DEVICE_CLASSES,
     SUPPORT_CLOSE,
     SUPPORT_CLOSE_TILT,
     SUPPORT_OPEN,
@@ -20,40 +20,92 @@ from homeassistant.components.cover import (
     SUPPORT_SET_TILT_POSITION,
     SUPPORT_STOP,
     SUPPORT_STOP_TILT,
+    CoverDeviceClass,
     CoverEntity,
 )
+from homeassistant.const import (
+    CONF_DEVICE_CLASS,
+    CONF_ENTITY_CATEGORY,
+    CONF_NAME,
+    Platform,
+)
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_utc_time_change
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN
+from .const import DATA_KNX_CONFIG, DOMAIN
 from .knx_entity import KnxEntity
+from .schema import CoverSchema
 
 
-async def async_setup_platform(
+async def async_setup_entry(
     hass: HomeAssistant,
-    config: ConfigType,
-    async_add_entities: Callable[[Iterable[Entity]], None],
-    discovery_info: DiscoveryInfoType | None = None,
+    config_entry: config_entries.ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up cover(s) for KNX platform."""
-    entities = []
-    for device in hass.data[DOMAIN].xknx.devices:
-        if isinstance(device, XknxCover):
-            entities.append(KNXCover(device))
-    async_add_entities(entities)
+    xknx: XKNX = hass.data[DOMAIN].xknx
+    config: list[ConfigType] = hass.data[DATA_KNX_CONFIG][Platform.COVER]
+
+    async_add_entities(KNXCover(xknx, entity_config) for entity_config in config)
 
 
 class KNXCover(KnxEntity, CoverEntity):
     """Representation of a KNX cover."""
 
-    def __init__(self, device: XknxCover):
-        """Initialize the cover."""
-        self._device: XknxCover
-        super().__init__(device)
+    _device: XknxCover
 
+    def __init__(self, xknx: XKNX, config: ConfigType) -> None:
+        """Initialize the cover."""
+        super().__init__(
+            device=XknxCover(
+                xknx,
+                name=config[CONF_NAME],
+                group_address_long=config.get(CoverSchema.CONF_MOVE_LONG_ADDRESS),
+                group_address_short=config.get(CoverSchema.CONF_MOVE_SHORT_ADDRESS),
+                group_address_stop=config.get(CoverSchema.CONF_STOP_ADDRESS),
+                group_address_position_state=config.get(
+                    CoverSchema.CONF_POSITION_STATE_ADDRESS
+                ),
+                group_address_angle=config.get(CoverSchema.CONF_ANGLE_ADDRESS),
+                group_address_angle_state=config.get(
+                    CoverSchema.CONF_ANGLE_STATE_ADDRESS
+                ),
+                group_address_position=config.get(CoverSchema.CONF_POSITION_ADDRESS),
+                travel_time_down=config[CoverSchema.CONF_TRAVELLING_TIME_DOWN],
+                travel_time_up=config[CoverSchema.CONF_TRAVELLING_TIME_UP],
+                invert_position=config[CoverSchema.CONF_INVERT_POSITION],
+                invert_angle=config[CoverSchema.CONF_INVERT_ANGLE],
+            )
+        )
         self._unsubscribe_auto_updater: Callable[[], None] | None = None
+
+        self._attr_entity_category = config.get(CONF_ENTITY_CATEGORY)
+        _supports_tilt = False
+        self._attr_supported_features = (
+            SUPPORT_CLOSE | SUPPORT_OPEN | SUPPORT_SET_POSITION
+        )
+        if self._device.step.writable:
+            _supports_tilt = True
+            self._attr_supported_features |= (
+                SUPPORT_CLOSE_TILT | SUPPORT_OPEN_TILT | SUPPORT_STOP_TILT
+            )
+        if self._device.supports_angle:
+            _supports_tilt = True
+            self._attr_supported_features |= SUPPORT_SET_TILT_POSITION
+        if self._device.supports_stop:
+            self._attr_supported_features |= SUPPORT_STOP
+            if _supports_tilt:
+                self._attr_supported_features |= SUPPORT_STOP_TILT
+
+        self._attr_device_class = config.get(CONF_DEVICE_CLASS) or (
+            CoverDeviceClass.BLIND if _supports_tilt else None
+        )
+        self._attr_unique_id = (
+            f"{self._device.updown.group_address}_"
+            f"{self._device.position_target.group_address}"
+        )
 
     @callback
     async def after_update_callback(self, device: XknxDevice) -> None:
@@ -61,30 +113,6 @@ class KNXCover(KnxEntity, CoverEntity):
         self.async_write_ha_state()
         if self._device.is_traveling():
             self.start_auto_updater()
-
-    @property
-    def device_class(self) -> str | None:
-        """Return the class of this device, from component DEVICE_CLASSES."""
-        if self._device.device_class in DEVICE_CLASSES:
-            return self._device.device_class
-        if self._device.supports_angle:
-            return DEVICE_CLASS_BLIND
-        return None
-
-    @property
-    def supported_features(self) -> int:
-        """Flag supported features."""
-        supported_features = SUPPORT_OPEN | SUPPORT_CLOSE | SUPPORT_SET_POSITION
-        if self._device.supports_stop:
-            supported_features |= SUPPORT_STOP
-        if self._device.supports_angle:
-            supported_features |= (
-                SUPPORT_SET_TILT_POSITION
-                | SUPPORT_OPEN_TILT
-                | SUPPORT_CLOSE_TILT
-                | SUPPORT_STOP_TILT
-            )
-        return supported_features
 
     @property
     def current_cover_position(self) -> int | None:

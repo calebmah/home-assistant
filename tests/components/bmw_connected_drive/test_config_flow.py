@@ -3,10 +3,7 @@ from unittest.mock import patch
 
 from homeassistant import config_entries, data_entry_flow
 from homeassistant.components.bmw_connected_drive.config_flow import DOMAIN
-from homeassistant.components.bmw_connected_drive.const import (
-    CONF_READ_ONLY,
-    CONF_USE_LOCATION,
-)
+from homeassistant.components.bmw_connected_drive.const import CONF_READ_ONLY
 from homeassistant.const import CONF_PASSWORD, CONF_REGION, CONF_USERNAME
 
 from tests.common import MockConfigEntry
@@ -28,10 +25,8 @@ FIXTURE_CONFIG_ENTRY = {
         CONF_PASSWORD: FIXTURE_USER_INPUT[CONF_PASSWORD],
         CONF_REGION: FIXTURE_USER_INPUT[CONF_REGION],
     },
-    "options": {CONF_READ_ONLY: False, CONF_USE_LOCATION: False},
-    "system_options": {"disable_new_entities": False},
-    "source": "user",
-    "connection_class": config_entries.CONN_CLASS_CLOUD_POLL,
+    "options": {CONF_READ_ONLY: False},
+    "source": config_entries.SOURCE_USER,
     "unique_id": f"{FIXTURE_USER_INPUT[CONF_REGION]}-{FIXTURE_USER_INPUT[CONF_REGION]}",
 }
 
@@ -73,8 +68,6 @@ async def test_full_user_flow_implementation(hass):
         "bimmer_connected.account.ConnectedDriveAccount._get_vehicles",
         return_value=[],
     ), patch(
-        "homeassistant.components.bmw_connected_drive.async_setup", return_value=True
-    ) as mock_setup, patch(
         "homeassistant.components.bmw_connected_drive.async_setup_entry",
         return_value=True,
     ) as mock_setup_entry:
@@ -87,32 +80,6 @@ async def test_full_user_flow_implementation(hass):
         assert result2["title"] == FIXTURE_COMPLETE_ENTRY[CONF_USERNAME]
         assert result2["data"] == FIXTURE_COMPLETE_ENTRY
 
-        assert len(mock_setup.mock_calls) == 1
-        assert len(mock_setup_entry.mock_calls) == 1
-
-
-async def test_full_config_flow_implementation(hass):
-    """Test registering an integration and finishing flow works."""
-    with patch(
-        "bimmer_connected.account.ConnectedDriveAccount._get_vehicles",
-        return_value=[],
-    ), patch(
-        "homeassistant.components.bmw_connected_drive.async_setup", return_value=True
-    ) as mock_setup, patch(
-        "homeassistant.components.bmw_connected_drive.async_setup_entry",
-        return_value=True,
-    ) as mock_setup_entry:
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN,
-            context={"source": config_entries.SOURCE_IMPORT},
-            data=FIXTURE_USER_INPUT,
-        )
-
-        assert result["type"] == data_entry_flow.RESULT_TYPE_CREATE_ENTRY
-        assert result["title"] == FIXTURE_IMPORT_ENTRY[CONF_USERNAME]
-        assert result["data"] == FIXTURE_IMPORT_ENTRY
-
-        assert len(mock_setup.mock_calls) == 1
         assert len(mock_setup_entry.mock_calls) == 1
 
 
@@ -122,8 +89,6 @@ async def test_options_flow_implementation(hass):
         "bimmer_connected.account.ConnectedDriveAccount._get_vehicles",
         return_value=[],
     ), patch(
-        "homeassistant.components.bmw_connected_drive.async_setup", return_value=True
-    ) as mock_setup, patch(
         "homeassistant.components.bmw_connected_drive.async_setup_entry",
         return_value=True,
     ) as mock_setup_entry:
@@ -139,15 +104,13 @@ async def test_options_flow_implementation(hass):
 
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
-            user_input={CONF_READ_ONLY: False, CONF_USE_LOCATION: False},
+            user_input={CONF_READ_ONLY: False},
         )
         await hass.async_block_till_done()
 
         assert result["type"] == data_entry_flow.RESULT_TYPE_CREATE_ENTRY
         assert result["data"] == {
             CONF_READ_ONLY: False,
-            CONF_USE_LOCATION: False,
         }
 
-        assert len(mock_setup.mock_calls) == 1
         assert len(mock_setup_entry.mock_calls) == 1

@@ -2,10 +2,22 @@
 
 import pytest
 
+from homeassistant.components import device_tracker
 from homeassistant.components.mqtt.discovery import ALREADY_DISCOVERED
 from homeassistant.const import STATE_HOME, STATE_NOT_HOME, STATE_UNKNOWN
+from homeassistant.setup import async_setup_component
+
+from .test_common import help_test_setting_blocked_attribute_via_mqtt_json_message
 
 from tests.common import async_fire_mqtt_message, mock_device_registry, mock_registry
+
+DEFAULT_CONFIG = {
+    device_tracker.DOMAIN: {
+        "platform": "mqtt",
+        "name": "test",
+        "state_topic": "test-topic",
+    }
+}
 
 
 @pytest.fixture
@@ -172,8 +184,13 @@ async def test_device_tracker_discovery_update(hass, mqtt_mock, caplog):
     assert state.name == "Cider"
 
 
-async def test_cleanup_device_tracker(hass, device_reg, entity_reg, mqtt_mock):
+async def test_cleanup_device_tracker(
+    hass, hass_ws_client, device_reg, entity_reg, mqtt_mock
+):
     """Test discvered device is cleaned up when removed from registry."""
+    assert await async_setup_component(hass, "config", {})
+    ws_client = await hass_ws_client(hass)
+
     async_fire_mqtt_message(
         hass,
         "homeassistant/device_tracker/bla/config",
@@ -192,7 +209,16 @@ async def test_cleanup_device_tracker(hass, device_reg, entity_reg, mqtt_mock):
     state = hass.states.get("device_tracker.mqtt_unique")
     assert state is not None
 
-    device_reg.async_remove_device(device_entry.id)
+    # Remove MQTT from the device
+    await ws_client.send_json(
+        {
+            "id": 6,
+            "type": "mqtt/device/remove",
+            "device_id": device_entry.id,
+        }
+    )
+    response = await ws_client.receive_json()
+    assert response["success"]
     await hass.async_block_till_done()
     await hass.async_block_till_done()
 
@@ -359,4 +385,11 @@ async def test_setting_device_tracker_location_via_lat_lon_message(
     async_fire_mqtt_message(hass, "attributes-topic", '{"latitude":32.87336}')
     state = hass.states.get("device_tracker.test")
     assert state.attributes["latitude"] == 32.87336
-    assert state.state == STATE_NOT_HOME
+    assert state.state == STATE_UNKNOWN
+
+
+async def test_setting_blocked_attribute_via_mqtt_json_message(hass, mqtt_mock):
+    """Test the setting of attribute via MQTT with JSON payload."""
+    await help_test_setting_blocked_attribute_via_mqtt_json_message(
+        hass, mqtt_mock, device_tracker.DOMAIN, DEFAULT_CONFIG, None
+    )

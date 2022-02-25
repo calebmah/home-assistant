@@ -2,24 +2,23 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from functools import partial
 import logging
-from typing import Callable
 
 from mysensors import BaseAsyncGateway
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.components.device_tracker import DOMAIN as DEVICE_TRACKER_DOMAIN
 from homeassistant.components.mqtt import valid_publish_topic, valid_subscribe_topic
-from homeassistant.components.notify import DOMAIN as NOTIFY_DOMAIN
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_OPTIMISTIC
+from homeassistant.const import CONF_OPTIMISTIC, Platform
 from homeassistant.core import HomeAssistant, callback
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.discovery import async_load_platform
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.typing import ConfigType, HomeAssistantType
+from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     ATTR_DEVICES,
@@ -40,9 +39,10 @@ from .const import (
     MYSENSORS_ON_UNLOAD,
     PLATFORMS_WITH_ENTRY_SUPPORT,
     DevId,
+    DiscoveryInfo,
     SensorType,
 )
-from .device import MySensorsDevice, MySensorsEntity, get_mysensors_devices
+from .device import MySensorsDevice, get_mysensors_devices
 from .gateway import finish_setup, get_mysensors_gateway, gw_stop, setup_gateway
 from .helpers import on_unload
 
@@ -58,32 +58,36 @@ DEFAULT_TCP_PORT = 5003
 DEFAULT_VERSION = "1.4"
 
 
-def has_all_unique_files(value):
-    """Validate that all persistence files are unique and set if any is set."""
-    persistence_files = [gateway.get(CONF_PERSISTENCE_FILE) for gateway in value]
-    if None in persistence_files and any(
-        name is not None for name in persistence_files
-    ):
-        raise vol.Invalid(
-            "persistence file name of all devices must be set if any is set"
-        )
-    if not all(name is None for name in persistence_files):
-        schema = vol.Schema(vol.Unique())
-        schema(persistence_files)
+def set_default_persistence_file(value: dict) -> dict:
+    """Set default persistence file."""
+    for idx, gateway in enumerate(value):
+        if gateway.get(CONF_PERSISTENCE_FILE) is not None:
+            continue
+        new_name = f"mysensors{idx + 1}.pickle"
+        gateway[CONF_PERSISTENCE_FILE] = new_name
+
     return value
 
 
-def is_persistence_file(value):
+def has_all_unique_files(value: list[dict]) -> list[dict]:
+    """Validate that all persistence files are unique and set if any is set."""
+    persistence_files = [gateway[CONF_PERSISTENCE_FILE] for gateway in value]
+    schema = vol.Schema(vol.Unique())
+    schema(persistence_files)
+    return value
+
+
+def is_persistence_file(value: str) -> str:
     """Validate that persistence file path ends in either .pickle or .json."""
     if value.endswith((".json", ".pickle")):
         return value
     raise vol.Invalid(f"{value} does not end in either `.json` or `.pickle`")
 
 
-def deprecated(key):
+def deprecated(key: str) -> Callable[[dict], dict]:
     """Mark key as deprecated in configuration."""
 
-    def validator(config):
+    def validator(config: dict) -> dict:
         """Check if key is in config, log warning and remove key."""
         if key not in config:
             return config
@@ -128,7 +132,10 @@ CONFIG_SCHEMA = vol.Schema(
                 deprecated(CONF_PERSISTENCE),
                 {
                     vol.Required(CONF_GATEWAYS): vol.All(
-                        cv.ensure_list, has_all_unique_files, [GATEWAY_SCHEMA]
+                        cv.ensure_list,
+                        set_default_persistence_file,
+                        has_all_unique_files,
+                        [GATEWAY_SCHEMA],
                     ),
                     vol.Optional(CONF_RETAIN, default=True): cv.boolean,
                     vol.Optional(CONF_VERSION, default=DEFAULT_VERSION): cv.string,
@@ -142,7 +149,7 @@ CONFIG_SCHEMA = vol.Schema(
 )
 
 
-async def async_setup(hass: HomeAssistantType, config: ConfigType) -> bool:
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the MySensors component."""
     hass.data[DOMAIN] = {DATA_HASS_CONFIG: config}
 
@@ -159,7 +166,7 @@ async def async_setup(hass: HomeAssistantType, config: ConfigType) -> bool:
             CONF_TOPIC_IN_PREFIX: gw.get(CONF_TOPIC_IN_PREFIX, ""),
             CONF_RETAIN: config[CONF_RETAIN],
             CONF_VERSION: config[CONF_VERSION],
-            CONF_PERSISTENCE_FILE: gw.get(CONF_PERSISTENCE_FILE)
+            CONF_PERSISTENCE_FILE: gw[CONF_PERSISTENCE_FILE]
             # nodes config ignored at this time. renaming nodes can now be done from the frontend.
         }
         for gw in config[CONF_GATEWAYS]
@@ -182,7 +189,7 @@ async def async_setup(hass: HomeAssistantType, config: ConfigType) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistantType, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up an instance of the MySensors integration.
 
     Every instance has a connection to exactly one Gateway.
@@ -201,7 +208,7 @@ async def async_setup_entry(hass: HomeAssistantType, entry: ConfigEntry) -> bool
     # Allow loading device tracker platform via discovery
     # until refactor to config entry is done.
 
-    for platform in (DEVICE_TRACKER_DOMAIN, NOTIFY_DOMAIN):
+    for platform in (Platform.DEVICE_TRACKER, Platform.NOTIFY):
         load_discovery_platform = partial(
             async_load_platform,
             hass,
@@ -210,7 +217,7 @@ async def async_setup_entry(hass: HomeAssistantType, entry: ConfigEntry) -> bool
             hass_config=hass.data[DOMAIN][DATA_HASS_CONFIG],
         )
 
-        await on_unload(
+        on_unload(
             hass,
             entry.entry_id,
             async_dispatcher_connect(
@@ -222,10 +229,10 @@ async def async_setup_entry(hass: HomeAssistantType, entry: ConfigEntry) -> bool
 
     async def finish() -> None:
         await asyncio.gather(
-            *[
+            *(
                 hass.config_entries.async_forward_entry_setup(entry, platform)
                 for platform in PLATFORMS_WITH_ENTRY_SUPPORT
-            ]
+            )
         )
         await finish_setup(hass, entry, gateway)
 
@@ -234,18 +241,13 @@ async def async_setup_entry(hass: HomeAssistantType, entry: ConfigEntry) -> bool
     return True
 
 
-async def async_unload_entry(hass: HomeAssistantType, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Remove an instance of the MySensors integration."""
 
     gateway = get_mysensors_gateway(hass, entry.entry_id)
 
-    unload_ok = all(
-        await asyncio.gather(
-            *[
-                hass.config_entries.async_forward_entry_unload(entry, platform)
-                for platform in PLATFORMS_WITH_ENTRY_SUPPORT
-            ]
-        )
+    unload_ok = await hass.config_entries.async_unload_platforms(
+        entry, PLATFORMS_WITH_ENTRY_SUPPORT
     )
     if not unload_ok:
         return False
@@ -263,12 +265,29 @@ async def async_unload_entry(hass: HomeAssistantType, entry: ConfigEntry) -> boo
     return True
 
 
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: DeviceEntry
+) -> bool:
+    """Remove a MySensors config entry from a device."""
+    gateway: BaseAsyncGateway = hass.data[DOMAIN][MYSENSORS_GATEWAYS][
+        config_entry.entry_id
+    ]
+    device_id = next(
+        device_id for domain, device_id in device_entry.identifiers if domain == DOMAIN
+    )
+    node_id = int(device_id.partition("-")[2])
+    gateway.sensors.pop(node_id, None)
+    gateway.tasks.persistence.need_save = True
+
+    return True
+
+
 @callback
 def setup_mysensors_platform(
     hass: HomeAssistant,
-    domain: str,  # hass platform name
-    discovery_info: dict[str, list[DevId]],
-    device_class: type[MySensorsDevice] | dict[SensorType, type[MySensorsEntity]],
+    domain: Platform,  # hass platform name
+    discovery_info: DiscoveryInfo,
+    device_class: type[MySensorsDevice] | dict[SensorType, type[MySensorsDevice]],
     device_args: (
         None | tuple
     ) = None,  # extra arguments that will be given to the entity constructor
@@ -299,11 +318,13 @@ def setup_mysensors_platform(
         if not gateway:
             _LOGGER.warning("Skipping setup of %s, no gateway found", dev_id)
             continue
-        device_class_copy = device_class
+
         if isinstance(device_class, dict):
             child = gateway.sensors[node_id].children[child_id]
             s_type = gateway.const.Presentation(child.type).name
             device_class_copy = device_class[s_type]
+        else:
+            device_class_copy = device_class
 
         args_copy = (*device_args, gateway_id, gateway, node_id, child_id, value_type)
         devices[dev_id] = device_class_copy(*args_copy)

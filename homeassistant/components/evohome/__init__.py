@@ -5,6 +5,7 @@ Such systems include evohome, Round Thermostat, and others.
 from __future__ import annotations
 
 from datetime import datetime as dt, timedelta
+from http import HTTPStatus
 import logging
 import re
 from typing import Any
@@ -19,11 +20,10 @@ from homeassistant.const import (
     CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_USERNAME,
-    HTTP_SERVICE_UNAVAILABLE,
-    HTTP_TOO_MANY_REQUESTS,
     TEMP_CELSIUS,
+    Platform,
 )
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.discovery import async_load_platform
@@ -32,8 +32,9 @@ from homeassistant.helpers.dispatcher import (
     async_dispatcher_send,
 )
 from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.service import verify_domain_control
-from homeassistant.helpers.typing import ConfigType, HomeAssistantType
+from homeassistant.helpers.typing import ConfigType
 import homeassistant.util.dt as dt_util
 
 from .const import DOMAIN, GWS, STORAGE_KEY, STORAGE_VER, TCS, UTC_OFFSET
@@ -158,13 +159,13 @@ def _handle_exception(err) -> bool:
         )
 
     except aiohttp.ClientResponseError:
-        if err.status == HTTP_SERVICE_UNAVAILABLE:
+        if err.status == HTTPStatus.SERVICE_UNAVAILABLE:
             _LOGGER.warning(
                 "The vendor says their server is currently unavailable. "
                 "Check the vendor's service status page"
             )
 
-        elif err.status == HTTP_TOO_MANY_REQUESTS:
+        elif err.status == HTTPStatus.TOO_MANY_REQUESTS:
             _LOGGER.warning(
                 "The vendor's API rate limit has been exceeded. "
                 "If this message persists, consider increasing the %s",
@@ -175,12 +176,12 @@ def _handle_exception(err) -> bool:
             raise  # we don't expect/handle any other Exceptions
 
 
-async def async_setup(hass: HomeAssistantType, config: ConfigType) -> bool:
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Create a (EMEA/EU-based) Honeywell TCC system."""
 
     async def load_auth_tokens(store) -> tuple[dict, dict | None]:
         app_storage = await store.async_load()
-        tokens = dict(app_storage if app_storage else {})
+        tokens = dict(app_storage or {})
 
         if tokens.pop(CONF_USERNAME, None) != config[DOMAIN][CONF_USERNAME]:
             # any tokens won't be valid, and store might be be corrupt
@@ -248,10 +249,12 @@ async def async_setup(hass: HomeAssistantType, config: ConfigType) -> bool:
     await broker.save_auth_tokens()
     await broker.async_update()  # get initial state
 
-    hass.async_create_task(async_load_platform(hass, "climate", DOMAIN, {}, config))
+    hass.async_create_task(
+        async_load_platform(hass, Platform.CLIMATE, DOMAIN, {}, config)
+    )
     if broker.tcs.hotwater:
         hass.async_create_task(
-            async_load_platform(hass, "water_heater", DOMAIN, {}, config)
+            async_load_platform(hass, Platform.WATER_HEATER, DOMAIN, {}, config)
         )
 
     hass.helpers.event.async_track_time_interval(
@@ -264,7 +267,7 @@ async def async_setup(hass: HomeAssistantType, config: ConfigType) -> bool:
 
 
 @callback
-def setup_service_functions(hass: HomeAssistantType, broker):
+def setup_service_functions(hass: HomeAssistant, broker):
     """Set up the service handlers for the system/zone operating modes.
 
     Not all Honeywell TCC-compatible systems support all operating modes. In addition,
@@ -275,12 +278,12 @@ def setup_service_functions(hass: HomeAssistantType, broker):
     """
 
     @verify_domain_control(hass, DOMAIN)
-    async def force_refresh(call) -> None:
+    async def force_refresh(call: ServiceCall) -> None:
         """Obtain the latest state data via the vendor's RESTful API."""
         await broker.async_update()
 
     @verify_domain_control(hass, DOMAIN)
-    async def set_system_mode(call) -> None:
+    async def set_system_mode(call: ServiceCall) -> None:
         """Set the system mode."""
         payload = {
             "unique_id": broker.tcs.systemId,
@@ -290,7 +293,7 @@ def setup_service_functions(hass: HomeAssistantType, broker):
         async_dispatcher_send(hass, DOMAIN, payload)
 
     @verify_domain_control(hass, DOMAIN)
-    async def set_zone_override(call) -> None:
+    async def set_zone_override(call: ServiceCall) -> None:
         """Set the zone override (setpoint)."""
         entity_id = call.data[ATTR_ENTITY_ID]
 
@@ -406,10 +409,12 @@ class EvoBroker:
         # evohomeasync2 uses naive/local datetimes
         access_token_expires = _dt_local_to_aware(self.client.access_token_expires)
 
-        app_storage = {CONF_USERNAME: self.client.username}
-        app_storage[REFRESH_TOKEN] = self.client.refresh_token
-        app_storage[ACCESS_TOKEN] = self.client.access_token
-        app_storage[ACCESS_TOKEN_EXPIRES] = access_token_expires.isoformat()
+        app_storage = {
+            CONF_USERNAME: self.client.username,
+            REFRESH_TOKEN: self.client.refresh_token,
+            ACCESS_TOKEN: self.client.access_token,
+            ACCESS_TOKEN_EXPIRES: access_token_expires.isoformat(),
+        }
 
         if self.client_v1 and self.client_v1.user_data:
             app_storage[USER_DATA] = {
@@ -430,7 +435,7 @@ class EvoBroker:
             return
 
         if update_state:  # wait a moment for system to quiesce before updating state
-            self.hass.helpers.event.async_call_later(1, self._update_v2_api_state)
+            async_call_later(self.hass, 1, self._update_v2_api_state)
 
         return result
 
@@ -529,7 +534,7 @@ class EvoDevice(Entity):
             return
         if payload["unique_id"] != self._unique_id:
             return
-        if payload["service"] in [SVC_SET_ZONE_OVERRIDE, SVC_RESET_ZONE_OVERRIDE]:
+        if payload["service"] in (SVC_SET_ZONE_OVERRIDE, SVC_RESET_ZONE_OVERRIDE):
             await self.async_zone_svc_request(payload["service"], payload["data"])
             return
         await self.async_tcs_svc_request(payload["service"], payload["data"])
@@ -651,10 +656,10 @@ class EvoChild(EvoDevice):
             this_sp_day = -1 if sp_idx == -1 else 0
             next_sp_day = 1 if sp_idx + 1 == len(day["Switchpoints"]) else 0
 
-            for key, offset, idx in [
+            for key, offset, idx in (
                 ("this", this_sp_day, sp_idx),
                 ("next", next_sp_day, (sp_idx + 1) * (1 - next_sp_day)),
-            ]:
+            ):
                 sp_date = (day_time + timedelta(days=offset)).strftime("%Y-%m-%d")
                 day = self._schedule["DailySchedules"][(day_of_week + offset) % 7]
                 switchpoint = day["Switchpoints"][idx]

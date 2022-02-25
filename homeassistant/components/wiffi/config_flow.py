@@ -18,7 +18,6 @@ class WiffiFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """Wiffi server setup config flow."""
 
     VERSION = 1
-    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_PUSH
 
     @staticmethod
     @callback
@@ -39,6 +38,7 @@ class WiffiFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             return self._async_show_form()
 
         # received input from form or configuration.yaml
+        self._async_abort_entries_match(user_input)
 
         try:
             # try to start server to check whether port is in use

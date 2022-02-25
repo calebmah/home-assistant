@@ -6,6 +6,8 @@ import tempfile
 from typing import Any
 from unittest.mock import patch
 
+from pytest import LogCaptureFixture
+
 from homeassistant import config as hass_config, setup
 from homeassistant.components.cover import DOMAIN, SCAN_INTERVAL
 from homeassistant.const import (
@@ -15,15 +17,14 @@ from homeassistant.const import (
     SERVICE_RELOAD,
     SERVICE_STOP_COVER,
 )
-from homeassistant.helpers.typing import HomeAssistantType
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry
 import homeassistant.util.dt as dt_util
 
-from tests.common import async_fire_time_changed
+from tests.common import async_fire_time_changed, get_fixture_path
 
 
-async def setup_test_entity(
-    hass: HomeAssistantType, config_dict: dict[str, Any]
-) -> None:
+async def setup_test_entity(hass: HomeAssistant, config_dict: dict[str, Any]) -> None:
     """Set up a test command line notify service."""
     assert await setup.async_setup_component(
         hass,
@@ -37,7 +38,7 @@ async def setup_test_entity(
     await hass.async_block_till_done()
 
 
-async def test_no_covers(caplog: Any, hass: HomeAssistantType) -> None:
+async def test_no_covers(caplog: LogCaptureFixture, hass: HomeAssistant) -> None:
     """Test that the cover does not polls when there's no state command."""
 
     with patch(
@@ -48,7 +49,7 @@ async def test_no_covers(caplog: Any, hass: HomeAssistantType) -> None:
         assert "No covers added" in caplog.text
 
 
-async def test_no_poll_when_cover_has_no_command_state(hass: HomeAssistantType) -> None:
+async def test_no_poll_when_cover_has_no_command_state(hass: HomeAssistant) -> None:
     """Test that the cover does not polls when there's no state command."""
 
     with patch(
@@ -61,7 +62,7 @@ async def test_no_poll_when_cover_has_no_command_state(hass: HomeAssistantType) 
         assert not check_output.called
 
 
-async def test_poll_when_cover_has_command_state(hass: HomeAssistantType) -> None:
+async def test_poll_when_cover_has_command_state(hass: HomeAssistant) -> None:
     """Test that the cover polls when there's a state  command."""
 
     with patch(
@@ -76,7 +77,7 @@ async def test_poll_when_cover_has_command_state(hass: HomeAssistantType) -> Non
         )
 
 
-async def test_state_value(hass: HomeAssistantType) -> None:
+async def test_state_value(hass: HomeAssistant) -> None:
     """Test with state value."""
     with tempfile.TemporaryDirectory() as tempdirname:
         path = os.path.join(tempdirname, "cover_status")
@@ -119,7 +120,7 @@ async def test_state_value(hass: HomeAssistantType) -> None:
         assert entity_state.state == "closed"
 
 
-async def test_reload(hass: HomeAssistantType) -> None:
+async def test_reload(hass: HomeAssistant) -> None:
     """Verify we can reload command_line covers."""
 
     await setup_test_entity(
@@ -135,11 +136,7 @@ async def test_reload(hass: HomeAssistantType) -> None:
     assert entity_state
     assert entity_state.state == "unknown"
 
-    yaml_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-        "fixtures",
-        "command_line/configuration.yaml",
-    )
+    yaml_path = get_fixture_path("configuration.yaml", "command_line")
     with patch.object(hass_config, "YAML_CONFIG_FILE", yaml_path):
         await hass.services.async_call(
             "command_line",
@@ -155,7 +152,9 @@ async def test_reload(hass: HomeAssistantType) -> None:
     assert hass.states.get("cover.from_yaml")
 
 
-async def test_move_cover_failure(caplog: Any, hass: HomeAssistantType) -> None:
+async def test_move_cover_failure(
+    caplog: LogCaptureFixture, hass: HomeAssistant
+) -> None:
     """Test with state value."""
 
     await setup_test_entity(
@@ -166,3 +165,41 @@ async def test_move_cover_failure(caplog: Any, hass: HomeAssistantType) -> None:
         DOMAIN, SERVICE_OPEN_COVER, {ATTR_ENTITY_ID: "cover.test"}, blocking=True
     )
     assert "Command failed" in caplog.text
+
+
+async def test_unique_id(hass: HomeAssistant) -> None:
+    """Test unique_id option and if it only creates one cover per id."""
+    await setup_test_entity(
+        hass,
+        {
+            "unique": {
+                "command_open": "echo open",
+                "command_close": "echo close",
+                "command_stop": "echo stop",
+                "unique_id": "unique",
+            },
+            "not_unique_1": {
+                "command_open": "echo open",
+                "command_close": "echo close",
+                "command_stop": "echo stop",
+                "unique_id": "not-so-unique-anymore",
+            },
+            "not_unique_2": {
+                "command_open": "echo open",
+                "command_close": "echo close",
+                "command_stop": "echo stop",
+                "unique_id": "not-so-unique-anymore",
+            },
+        },
+    )
+
+    assert len(hass.states.async_all()) == 2
+
+    ent_reg = entity_registry.async_get(hass)
+
+    assert len(ent_reg.entities) == 2
+    assert ent_reg.async_get_entity_id("cover", "command_line", "unique") is not None
+    assert (
+        ent_reg.async_get_entity_id("cover", "command_line", "not-so-unique-anymore")
+        is not None
+    )

@@ -1,12 +1,10 @@
 """The test for the History Statistics sensor platform."""
 # pylint: disable=protected-access
 from datetime import datetime, timedelta
-from os import path
 import unittest
 from unittest.mock import patch
 
 import pytest
-import pytz
 
 from homeassistant import config as hass_config
 from homeassistant.components.history_stats import DOMAIN
@@ -17,7 +15,12 @@ from homeassistant.helpers.template import Template
 from homeassistant.setup import async_setup_component, setup_component
 import homeassistant.util.dt as dt_util
 
-from tests.common import get_test_home_assistant, init_recorder_component
+from tests.common import (
+    async_init_recorder_component,
+    get_fixture_path,
+    get_test_home_assistant,
+    init_recorder_component,
+)
 
 
 class TestHistoryStatsSensor(unittest.TestCase):
@@ -32,7 +35,6 @@ class TestHistoryStatsSensor(unittest.TestCase):
         """Test the history statistics sensor setup."""
         self.init_recorder()
         config = {
-            "history": {},
             "sensor": {
                 "platform": "history_stats",
                 "entity_id": "binary_sensor.test_id",
@@ -54,7 +56,6 @@ class TestHistoryStatsSensor(unittest.TestCase):
         """Test the history statistics sensor setup for multiple states."""
         self.init_recorder()
         config = {
-            "history": {},
             "sensor": {
                 "platform": "history_stats",
                 "entity_id": "binary_sensor.test_id",
@@ -78,7 +79,7 @@ class TestHistoryStatsSensor(unittest.TestCase):
     )
     def test_period_parsing(self, mock):
         """Test the conversion from templates to period."""
-        now = datetime(2019, 1, 1, 23, 30, 0, tzinfo=pytz.utc)
+        now = datetime(2019, 1, 1, 23, 30, 0, tzinfo=dt_util.UTC)
         with patch("homeassistant.util.dt.now", return_value=now):
             today = Template(
                 "{{ now().replace(hour=0).replace(minute=0).replace(second=0) }}",
@@ -143,7 +144,6 @@ class TestHistoryStatsSensor(unittest.TestCase):
         """Test when duration value is not a timedelta."""
         self.init_recorder()
         config = {
-            "history": {},
             "sensor": {
                 "platform": "history_stats",
                 "entity_id": "binary_sensor.test_id",
@@ -184,7 +184,6 @@ class TestHistoryStatsSensor(unittest.TestCase):
         """Test config when not enough arguments provided."""
         self.init_recorder()
         config = {
-            "history": {},
             "sensor": {
                 "platform": "history_stats",
                 "entity_id": "binary_sensor.test_id",
@@ -203,7 +202,6 @@ class TestHistoryStatsSensor(unittest.TestCase):
         """Test config when too many arguments provided."""
         self.init_recorder()
         config = {
-            "history": {},
             "sensor": {
                 "platform": "history_stats",
                 "entity_id": "binary_sensor.test_id",
@@ -228,9 +226,7 @@ class TestHistoryStatsSensor(unittest.TestCase):
 
 async def test_reload(hass):
     """Verify we can reload history_stats sensors."""
-    await hass.async_add_executor_job(
-        init_recorder_component, hass
-    )  # force in memory db
+    await async_init_recorder_component(hass)
 
     hass.state = ha.CoreState.not_running
     hass.states.async_set("binary_sensor.test_id", "on")
@@ -257,11 +253,7 @@ async def test_reload(hass):
 
     assert hass.states.get("sensor.test")
 
-    yaml_path = path.join(
-        _get_fixtures_base_path(),
-        "fixtures",
-        "history_stats/configuration.yaml",
-    )
+    yaml_path = get_fixture_path("configuration.yaml", "history_stats")
     with patch.object(hass_config, "YAML_CONFIG_FILE", yaml_path):
         await hass.services.async_call(
             DOMAIN,
@@ -278,7 +270,9 @@ async def test_reload(hass):
 
 
 async def test_measure_multiple(hass):
-    """Test the history statistics sensor measure for multiple states."""
+    """Test the history statistics sensor measure for multiple ."""
+    await async_init_recorder_component(hass)
+
     t0 = dt_util.utcnow() - timedelta(minutes=40)
     t1 = t0 + timedelta(minutes=20)
     t2 = dt_util.utcnow() - timedelta(minutes=10)
@@ -295,70 +289,63 @@ async def test_measure_multiple(hass):
         ]
     }
 
-    start = Template("{{ as_timestamp(now()) - 3600 }}", hass)
-    end = Template("{{ now() }}", hass)
-
-    sensor1 = HistoryStatsSensor(
+    await async_setup_component(
         hass,
-        "input_select.test_id",
-        ["orange", "blue"],
-        start,
-        end,
-        None,
-        "time",
-        "Test",
+        "sensor",
+        {
+            "sensor": [
+                {
+                    "platform": "history_stats",
+                    "entity_id": "input_select.test_id",
+                    "name": "sensor1",
+                    "state": ["orange", "blue"],
+                    "start": "{{ as_timestamp(now()) - 3600 }}",
+                    "end": "{{ now() }}",
+                    "type": "time",
+                },
+                {
+                    "platform": "history_stats",
+                    "entity_id": "unknown.test_id",
+                    "name": "sensor2",
+                    "state": ["orange", "blue"],
+                    "start": "{{ as_timestamp(now()) - 3600 }}",
+                    "end": "{{ now() }}",
+                    "type": "time",
+                },
+                {
+                    "platform": "history_stats",
+                    "entity_id": "input_select.test_id",
+                    "name": "sensor3",
+                    "state": ["orange", "blue"],
+                    "start": "{{ as_timestamp(now()) - 3600 }}",
+                    "end": "{{ now() }}",
+                    "type": "count",
+                },
+                {
+                    "platform": "history_stats",
+                    "entity_id": "input_select.test_id",
+                    "name": "sensor4",
+                    "state": ["orange", "blue"],
+                    "start": "{{ as_timestamp(now()) - 3600 }}",
+                    "end": "{{ now() }}",
+                    "type": "ratio",
+                },
+            ]
+        },
     )
-
-    sensor2 = HistoryStatsSensor(
-        hass,
-        "unknown.id",
-        ["orange", "blue"],
-        start,
-        end,
-        None,
-        "time",
-        "Test",
-    )
-
-    sensor3 = HistoryStatsSensor(
-        hass,
-        "input_select.test_id",
-        ["orange", "blue"],
-        start,
-        end,
-        None,
-        "count",
-        "test",
-    )
-
-    sensor4 = HistoryStatsSensor(
-        hass,
-        "input_select.test_id",
-        ["orange", "blue"],
-        start,
-        end,
-        None,
-        "ratio",
-        "test",
-    )
-
-    assert sensor1._type == "time"
-    assert sensor3._type == "count"
-    assert sensor4._type == "ratio"
 
     with patch(
-        "homeassistant.components.history.state_changes_during_period",
+        "homeassistant.components.recorder.history.state_changes_during_period",
         return_value=fake_states,
-    ), patch("homeassistant.components.history.get_state", return_value=None):
-        await sensor1.async_update()
-        await sensor2.async_update()
-        await sensor3.async_update()
-        await sensor4.async_update()
+    ), patch("homeassistant.components.recorder.history.get_state", return_value=None):
+        for i in range(1, 5):
+            await hass.helpers.entity_component.async_update_entity(f"sensor.sensor{i}")
+        await hass.async_block_till_done()
 
-    assert sensor1.state == 0.5
-    assert sensor2.state is None
-    assert sensor3.state == 2
-    assert sensor4.state == 50
+    assert hass.states.get("sensor.sensor1").state == "0.5"
+    assert hass.states.get("sensor.sensor2").state == STATE_UNKNOWN
+    assert hass.states.get("sensor.sensor3").state == "2"
+    assert hass.states.get("sensor.sensor4").state == "50.0"
 
 
 async def async_test_measure(hass):
@@ -379,43 +366,60 @@ async def async_test_measure(hass):
         ]
     }
 
-    start = Template("{{ as_timestamp(now()) - 3600 }}", hass)
-    end = Template("{{ now() }}", hass)
-
-    sensor1 = HistoryStatsSensor(
-        hass, "binary_sensor.test_id", "on", start, end, None, "time", "Test"
+    await async_setup_component(
+        hass,
+        "sensor",
+        {
+            "sensor": [
+                {
+                    "platform": "history_stats",
+                    "entity_id": "binary_sensor.test_id",
+                    "name": "sensor1",
+                    "state": "on",
+                    "start": "{{ as_timestamp(now()) - 3600 }}",
+                    "end": "{{ now() }}",
+                    "type": "time",
+                },
+                {
+                    "platform": "history_stats",
+                    "entity_id": "binary_sensor.test_id",
+                    "name": "sensor2",
+                    "state": "on",
+                    "start": "{{ as_timestamp(now()) - 3600 }}",
+                    "end": "{{ now() }}",
+                    "type": "time",
+                },
+                {
+                    "platform": "history_stats",
+                    "entity_id": "binary_sensor.test_id",
+                    "name": "sensor3",
+                    "state": "on",
+                    "start": "{{ as_timestamp(now()) - 3600 }}",
+                    "end": "{{ now() }}",
+                    "type": "count",
+                },
+                {
+                    "platform": "history_stats",
+                    "entity_id": "binary_sensor.test_id",
+                    "name": "sensor4",
+                    "state": "on",
+                    "start": "{{ as_timestamp(now()) - 3600 }}",
+                    "end": "{{ now() }}",
+                    "type": "ratio",
+                },
+            ]
+        },
     )
-
-    sensor2 = HistoryStatsSensor(
-        hass, "unknown.id", "on", start, end, None, "time", "Test"
-    )
-
-    sensor3 = HistoryStatsSensor(
-        hass, "binary_sensor.test_id", "on", start, end, None, "count", "test"
-    )
-
-    sensor4 = HistoryStatsSensor(
-        hass, "binary_sensor.test_id", "on", start, end, None, "ratio", "test"
-    )
-
-    assert sensor1._type == "time"
-    assert sensor3._type == "count"
-    assert sensor4._type == "ratio"
 
     with patch(
-        "homeassistant.components.history.state_changes_during_period",
+        "homeassistant.components.recorder.history.state_changes_during_period",
         return_value=fake_states,
-    ), patch("homeassistant.components.history.get_state", return_value=None):
-        await sensor1.async_update()
-        await sensor2.async_update()
-        await sensor3.async_update()
-        await sensor4.async_update()
+    ), patch("homeassistant.components.recorder.history.get_state", return_value=None):
+        for i in range(1, 5):
+            await hass.helpers.entity_component.async_update_entity(f"sensor.sensor{i}")
+        await hass.async_block_till_done()
 
-    assert sensor1.state == 0.5
-    assert sensor2.state is None
-    assert sensor3.state == 2
-    assert sensor4.state == 50
-
-
-def _get_fixtures_base_path():
-    return path.dirname(path.dirname(path.dirname(__file__)))
+    assert hass.states.get("sensor.sensor1").state == "0.5"
+    assert hass.states.get("sensor.sensor2").state == STATE_UNKNOWN
+    assert hass.states.get("sensor.sensor3").state == "2"
+    assert hass.states.get("sensor.sensor4").state == "50.0"

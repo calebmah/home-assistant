@@ -1,7 +1,9 @@
 """Support for media browsing."""
 import asyncio
+import contextlib
 import logging
 
+from homeassistant.components import media_source
 from homeassistant.components.media_player import BrowseError, BrowseMedia
 from homeassistant.components.media_player.const import (
     MEDIA_CLASS_ALBUM,
@@ -71,7 +73,7 @@ async def build_item_response(media_library, payload, get_thumbnail_url=None):
         return None
 
     children = await asyncio.gather(
-        *[item_payload(item, get_thumbnail_url) for item in media]
+        *(item_payload(item, get_thumbnail_url) for item in media)
     )
 
     if search_type in (MEDIA_TYPE_TVSHOW, MEDIA_TYPE_MOVIE) and search_id == "":
@@ -146,8 +148,7 @@ async def item_payload(item, get_thumbnail_url=None):
     elif "channelid" in item:
         media_content_type = MEDIA_TYPE_CHANNEL
         media_content_id = f"{item['channelid']}"
-        broadcasting = item.get("broadcastnow")
-        if broadcasting:
+        if broadcasting := item.get("broadcastnow"):
             show = broadcasting.get("title")
             title = f"{title} - {show}"
         can_play = True
@@ -185,7 +186,7 @@ async def item_payload(item, get_thumbnail_url=None):
     )
 
 
-async def library_payload():
+async def library_payload(hass):
     """
     Create response payload to describe contents of a specific library.
 
@@ -209,7 +210,7 @@ async def library_payload():
     }
 
     library_info.children = await asyncio.gather(
-        *[
+        *(
             item_payload(
                 {
                     "label": item["label"],
@@ -220,8 +221,16 @@ async def library_payload():
             for item in [
                 {"label": name, "type": type_} for type_, name in library.items()
             ]
-        ]
+        )
     )
+
+    with contextlib.suppress(media_source.BrowseError):
+        item = await media_source.async_browse_media(hass, None)
+        # If domain is None, it's overview of available sources
+        if item.domain is None:
+            library_info.children.extend(item.children)
+        else:
+            library_info.children.append(item)
 
     return library_info
 

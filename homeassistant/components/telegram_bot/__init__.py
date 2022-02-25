@@ -26,10 +26,13 @@ from homeassistant.const import (
     CONF_API_KEY,
     CONF_PLATFORM,
     CONF_URL,
+    HTTP_BEARER_AUTHENTICATION,
     HTTP_DIGEST_AUTHENTICATION,
 )
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import TemplateError
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.typing import ConfigType
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,6 +63,7 @@ ATTR_PASSWORD = "password"
 ATTR_REPLY_TO_MSGID = "reply_to_message_id"
 ATTR_REPLYMARKUP = "reply_markup"
 ATTR_SHOW_ALERT = "show_alert"
+ATTR_STICKER_ID = "sticker_id"
 ATTR_TARGET = "target"
 ATTR_TEXT = "text"
 ATTR_URL = "url"
@@ -68,6 +72,7 @@ ATTR_USERNAME = "username"
 ATTR_VERIFY_SSL = "verify_ssl"
 ATTR_TIMEOUT = "timeout"
 ATTR_MESSAGE_TAG = "message_tag"
+ATTR_CHANNEL_POST = "channel_post"
 
 CONF_ALLOWED_CHAT_IDS = "allowed_chat_ids"
 CONF_PROXY_URL = "proxy_url"
@@ -161,6 +166,10 @@ SERVICE_SCHEMA_SEND_FILE = BASE_SERVICE_SCHEMA.extend(
     }
 )
 
+SERVICE_SCHEMA_SEND_STICKER = SERVICE_SCHEMA_SEND_FILE.extend(
+    {vol.Optional(ATTR_STICKER_ID): cv.string}
+)
+
 SERVICE_SCHEMA_SEND_LOCATION = BASE_SERVICE_SCHEMA.extend(
     {
         vol.Required(ATTR_LONGITUDE): cv.template,
@@ -224,7 +233,7 @@ SERVICE_SCHEMA_LEAVE_CHAT = vol.Schema({vol.Required(ATTR_CHAT_ID): vol.Coerce(i
 SERVICE_MAP = {
     SERVICE_SEND_MESSAGE: SERVICE_SCHEMA_SEND_MESSAGE,
     SERVICE_SEND_PHOTO: SERVICE_SCHEMA_SEND_FILE,
-    SERVICE_SEND_STICKER: SERVICE_SCHEMA_SEND_FILE,
+    SERVICE_SEND_STICKER: SERVICE_SCHEMA_SEND_STICKER,
     SERVICE_SEND_ANIMATION: SERVICE_SCHEMA_SEND_FILE,
     SERVICE_SEND_VIDEO: SERVICE_SCHEMA_SEND_FILE,
     SERVICE_SEND_VOICE: SERVICE_SCHEMA_SEND_FILE,
@@ -254,7 +263,9 @@ def load_data(
         if url is not None:
             # Load data from URL
             params = {"timeout": 15}
-            if username is not None and password is not None:
+            if authentication == HTTP_BEARER_AUTHENTICATION and password is not None:
+                params["headers"] = {"Authorization": f"Bearer {password}"}
+            elif username is not None and password is not None:
                 if authentication == HTTP_DIGEST_AUTHENTICATION:
                     params["auth"] = HTTPDigestAuth(username, password)
                 else:
@@ -294,7 +305,7 @@ def load_data(
     return None
 
 
-async def async_setup(hass, config):
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the Telegram bot component."""
     if not config[DOMAIN]:
         return False
@@ -321,14 +332,13 @@ async def async_setup(hass, config):
             hass, bot, p_config.get(CONF_ALLOWED_CHAT_IDS), p_config.get(ATTR_PARSER)
         )
 
-    async def async_send_telegram_message(service):
+    async def async_send_telegram_message(service: ServiceCall) -> None:
         """Handle sending Telegram Bot message service calls."""
 
         def _render_template_attr(data, attribute):
-            attribute_templ = data.get(attribute)
-            if attribute_templ:
+            if attribute_templ := data.get(attribute):
                 if any(
-                    isinstance(attribute_templ, vtype) for vtype in [float, int, str]
+                    isinstance(attribute_templ, vtype) for vtype in (float, int, str)
                 ):
                     data[attribute] = attribute_templ
                 else:
@@ -348,7 +358,7 @@ async def async_setup(hass, config):
 
         msgtype = service.service
         kwargs = dict(service.data)
-        for attribute in [
+        for attribute in (
             ATTR_MESSAGE,
             ATTR_TITLE,
             ATTR_URL,
@@ -356,7 +366,7 @@ async def async_setup(hass, config):
             ATTR_CAPTION,
             ATTR_LONGITUDE,
             ATTR_LATITUDE,
-        ]:
+        ):
             _render_template_attr(kwargs, attribute)
         _LOGGER.debug("New telegram message %s: %s", msgtype, kwargs)
 
@@ -366,7 +376,6 @@ async def async_setup(hass, config):
             )
         elif msgtype in [
             SERVICE_SEND_PHOTO,
-            SERVICE_SEND_STICKER,
             SERVICE_SEND_ANIMATION,
             SERVICE_SEND_VIDEO,
             SERVICE_SEND_VOICE,
@@ -374,6 +383,10 @@ async def async_setup(hass, config):
         ]:
             await hass.async_add_executor_job(
                 partial(notify_service.send_file, msgtype, **kwargs)
+            )
+        elif msgtype == SERVICE_SEND_STICKER:
+            await hass.async_add_executor_job(
+                partial(notify_service.send_sticker, **kwargs)
             )
         elif msgtype == SERVICE_SEND_LOCATION:
             await hass.async_add_executor_job(
@@ -572,7 +585,7 @@ class TelegramNotificationService:
                 }
                 if message_tag is not None:
                     event_data[ATTR_MESSAGE_TAG] = message_tag
-                self.hass.bus.async_fire(EVENT_TELEGRAM_SENT, event_data)
+                self.hass.bus.fire(EVENT_TELEGRAM_SENT, event_data)
             elif not isinstance(out, bool):
                 _LOGGER.warning(
                     "Update last message: out_type:%s, out=%s", type(out), out
@@ -792,6 +805,25 @@ class TelegramNotificationService:
         else:
             _LOGGER.error("Can't send file with kwargs: %s", kwargs)
 
+    def send_sticker(self, target=None, **kwargs):
+        """Send a sticker from a telegram sticker pack."""
+        params = self._get_msg_kwargs(kwargs)
+        stickerid = kwargs.get(ATTR_STICKER_ID)
+        if stickerid:
+            for chat_id in self._get_target_chat_ids(target):
+                self._send_msg(
+                    self.bot.send_sticker,
+                    "Error sending sticker",
+                    params[ATTR_MESSAGE_TAG],
+                    chat_id=chat_id,
+                    sticker=stickerid,
+                    disable_notification=params[ATTR_DISABLE_NOTIF],
+                    reply_markup=params[ATTR_REPLYMARKUP],
+                    timeout=params[ATTR_TIMEOUT],
+                )
+        else:
+            self.send_file(SERVICE_SEND_STICKER, target, **kwargs)
+
     def send_location(self, latitude, longitude, target=None, **kwargs):
         """Send a location."""
         latitude = float(latitude)
@@ -844,7 +876,7 @@ class BaseTelegramBotEntity:
 
         if (
             msg_data["from"].get("id") not in self.allowed_chat_ids
-            and msg_data["chat"].get("id") not in self.allowed_chat_ids
+            and msg_data["message"]["chat"].get("id") not in self.allowed_chat_ids
         ):
             # Neither from id nor chat id was in allowed_chat_ids,
             # origin is not allowed.
@@ -865,6 +897,31 @@ class BaseTelegramBotEntity:
             data[ATTR_CHAT_ID] = msg_data[ATTR_MESSAGE]["chat"]["id"]
 
         return True, data
+
+    def _get_channel_post_data(self, msg_data):
+        """Return boolean msg_data_is_ok and dict msg_data."""
+        if not msg_data:
+            return False, None
+
+        if "sender_chat" in msg_data and "chat" in msg_data and "text" in msg_data:
+            if (
+                msg_data["sender_chat"].get("id") not in self.allowed_chat_ids
+                and msg_data["chat"].get("id") not in self.allowed_chat_ids
+            ):
+                # Neither sender_chat id nor chat id was in allowed_chat_ids,
+                # origin is not allowed.
+                _LOGGER.error("Incoming message is not allowed (%s)", msg_data)
+                return True, None
+
+            data = {
+                ATTR_MSGID: msg_data["message_id"],
+                ATTR_CHAT_ID: msg_data["chat"]["id"],
+                ATTR_TEXT: msg_data["text"],
+            }
+            return True, data
+
+        _LOGGER.error("Incoming message does not have required data (%s)", msg_data)
+        return False, None
 
     def process_message(self, data):
         """Check for basic message rules and fire an event if message is ok."""
@@ -913,6 +970,15 @@ class BaseTelegramBotEntity:
             event_data[ATTR_MSG] = data[ATTR_MSG]
             event_data[ATTR_CHAT_INSTANCE] = data[ATTR_CHAT_INSTANCE]
             event_data[ATTR_MSGID] = data[ATTR_MSGID]
+
+            self.hass.bus.async_fire(event, event_data)
+            return True
+        if ATTR_CHANNEL_POST in data:
+            event = EVENT_TELEGRAM_TEXT
+            data = data.get(ATTR_CHANNEL_POST)
+            message_ok, event_data = self._get_channel_post_data(data)
+            if event_data is None:
+                return message_ok
 
             self.hass.bus.async_fire(event, event_data)
             return True

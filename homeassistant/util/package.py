@@ -50,7 +50,7 @@ def is_installed(package: str) -> bool:
         # was aborted while in progress see
         # https://github.com/home-assistant/core/issues/47699
         if installed_version is None:
-            _LOGGER.error("Installed version for %s resolved to None", req.project_name)  # type: ignore
+            _LOGGER.error("Installed version for %s resolved to None", req.project_name)  # type: ignore[unreachable]
             return False
         return installed_version in req
     except PackageNotFoundError:
@@ -63,6 +63,7 @@ def install_package(
     target: str | None = None,
     constraints: str | None = None,
     find_links: str | None = None,
+    timeout: int | None = None,
     no_cache_dir: bool | None = False,
 ) -> bool:
     """Install a package on PyPi. Accepts pip compatible package strings.
@@ -73,6 +74,8 @@ def install_package(
     _LOGGER.info("Attempting install of %s", package)
     env = os.environ.copy()
     args = [sys.executable, "-m", "pip", "install", "--quiet", package]
+    if timeout:
+        args += ["--timeout", str(timeout)]
     if no_cache_dir:
         args.append("--no-cache-dir")
     if upgrade:
@@ -86,19 +89,19 @@ def install_package(
         # This only works if not running in venv
         args += ["--user"]
         env["PYTHONUSERBASE"] = os.path.abspath(target)
-        if sys.platform != "win32":
-            # Workaround for incompatible prefix setting
-            # See http://stackoverflow.com/a/4495175
-            args += ["--prefix="]
-    process = Popen(args, stdin=PIPE, stdout=PIPE, stderr=PIPE, env=env)
-    _, stderr = process.communicate()
-    if process.returncode != 0:
-        _LOGGER.error(
-            "Unable to install package %s: %s",
-            package,
-            stderr.decode("utf-8").lstrip().strip(),
-        )
-        return False
+        # Workaround for incompatible prefix setting
+        # See http://stackoverflow.com/a/4495175
+        args += ["--prefix="]
+    _LOGGER.debug("Running pip command: args=%s", args)
+    with Popen(args, stdin=PIPE, stdout=PIPE, stderr=PIPE, env=env) as process:
+        _, stderr = process.communicate()
+        if process.returncode != 0:
+            _LOGGER.error(
+                "Unable to install package %s: %s",
+                package,
+                stderr.decode("utf-8").lstrip().strip(),
+            )
+            return False
 
     return True
 

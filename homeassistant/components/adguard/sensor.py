@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Callable
 
 from adguardhome import AdGuardHome, AdGuardHomeConnectionError
 
@@ -11,7 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, TIME_MILLISECONDS
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import PlatformNotReady
-from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import AdGuardHomeDeviceEntity
 from .const import DATA_ADGUARD_CLIENT, DATA_ADGUARD_VERSION, DOMAIN
@@ -23,7 +22,7 @@ PARALLEL_UPDATES = 4
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: Callable[[list[Entity], bool], None],
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up AdGuard Home sensor based on a config entry."""
     adguard = hass.data[DOMAIN][entry.entry_id][DATA_ADGUARD_CLIENT]
@@ -63,7 +62,7 @@ class AdGuardHomeSensor(AdGuardHomeDeviceEntity, SensorEntity):
         enabled_default: bool = True,
     ) -> None:
         """Initialize AdGuard Home sensor."""
-        self._state = None
+        self._state: int | str | None = None
         self._unit_of_measurement = unit_of_measurement
         self.measurement = measurement
 
@@ -83,12 +82,12 @@ class AdGuardHomeSensor(AdGuardHomeDeviceEntity, SensorEntity):
         )
 
     @property
-    def state(self) -> str | None:
+    def native_value(self) -> int | str | None:
         """Return the state of the sensor."""
         return self._state
 
     @property
-    def unit_of_measurement(self) -> str | None:
+    def native_unit_of_measurement(self) -> str | None:
         """Return the unit this state is expressed in."""
         return self._unit_of_measurement
 

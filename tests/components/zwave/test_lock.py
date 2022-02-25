@@ -1,10 +1,15 @@
 """Test Z-Wave locks."""
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from homeassistant import config_entries
 from homeassistant.components.zwave import const, lock
 
 from tests.mock.zwave import MockEntityValues, MockNode, MockValue, value_changed
+
+# Integration is disabled
+pytest.skip("Integration has been disabled in the manifest", allow_module_level=True)
 
 
 def test_get_device_detects_lock(mock_openzwave):
@@ -286,8 +291,6 @@ async def setup_ozw(hass, mock_openzwave):
         "Mock Title",
         {"usb_path": "mock-path", "network_key": "mock-key"},
         "test",
-        config_entries.CONN_CLASS_LOCAL_PUSH,
-        system_options={},
     )
     await hass.config_entries.async_forward_entry_setup(config_entry, "lock")
     await hass.async_block_till_done()

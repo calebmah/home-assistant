@@ -1,15 +1,15 @@
 """Support for Litter-Robot sensors."""
 from __future__ import annotations
 
-from typing import Callable
+from datetime import datetime
 
 from pylitterbot.robot import Robot
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, StateType
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import DEVICE_CLASS_TIMESTAMP, PERCENTAGE
+from homeassistant.const import PERCENTAGE
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .entity import LitterRobotEntity
@@ -38,7 +38,7 @@ class LitterRobotPropertySensor(LitterRobotEntity, SensorEntity):
         self.sensor_attribute = sensor_attribute
 
     @property
-    def state(self) -> str:
+    def native_value(self) -> StateType | datetime:
         """Return the state."""
         return getattr(self.robot, self.sensor_attribute)
 
@@ -47,7 +47,7 @@ class LitterRobotWasteSensor(LitterRobotPropertySensor):
     """Litter-Robot waste sensor."""
 
     @property
-    def unit_of_measurement(self) -> str:
+    def native_unit_of_measurement(self) -> str:
         """Return unit of measurement."""
         return PERCENTAGE
 
@@ -61,16 +61,16 @@ class LitterRobotSleepTimeSensor(LitterRobotPropertySensor):
     """Litter-Robot sleep time sensor."""
 
     @property
-    def state(self) -> str | None:
+    def native_value(self) -> StateType | datetime:
         """Return the state."""
         if self.robot.sleep_mode_enabled:
-            return super().state.isoformat()
+            return super().native_value
         return None
 
     @property
     def device_class(self) -> str:
         """Return the device class, if any."""
-        return DEVICE_CLASS_TIMESTAMP
+        return SensorDeviceClass.TIMESTAMP
 
 
 ROBOT_SENSORS: list[tuple[type[LitterRobotPropertySensor], str, str]] = [
@@ -83,7 +83,7 @@ ROBOT_SENSORS: list[tuple[type[LitterRobotPropertySensor], str, str]] = [
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: Callable[[list[Entity], bool], None],
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Litter-Robot sensors using config entry."""
     hub: LitterRobotHub = hass.data[DOMAIN][entry.entry_id]
@@ -100,4 +100,4 @@ async def async_setup_entry(
                 )
             )
 
-    async_add_entities(entities, True)
+    async_add_entities(entities)

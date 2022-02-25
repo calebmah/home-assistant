@@ -24,8 +24,6 @@ from homeassistant.components.media_player import (
     ATTR_MEDIA_VOLUME_LEVEL,
     ATTR_MEDIA_VOLUME_MUTED,
     ATTR_SOUND_MODE,
-    DEVICE_CLASS_SPEAKER,
-    DEVICE_CLASS_TV,
     DOMAIN as MP_DOMAIN,
     SERVICE_MEDIA_NEXT_TRACK,
     SERVICE_MEDIA_PREVIOUS_TRACK,
@@ -37,7 +35,9 @@ from homeassistant.components.media_player import (
     SERVICE_VOLUME_MUTE,
     SERVICE_VOLUME_SET,
     SERVICE_VOLUME_UP,
+    MediaPlayerDeviceClass,
 )
+from homeassistant.components.media_player.const import ATTR_INPUT_SOURCE_LIST
 from homeassistant.components.vizio import validate_apps
 from homeassistant.components.vizio.const import (
     CONF_ADDITIONAL_CONFIGS,
@@ -49,7 +49,7 @@ from homeassistant.components.vizio.const import (
     VIZIO_SCHEMA,
 )
 from homeassistant.const import ATTR_ENTITY_ID, STATE_OFF, STATE_ON, STATE_UNAVAILABLE
-from homeassistant.helpers.typing import HomeAssistantType
+from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -82,7 +82,7 @@ from tests.common import MockConfigEntry, async_fire_time_changed
 
 
 async def _add_config_entry_to_hass(
-    hass: HomeAssistantType, config_entry: MockConfigEntry
+    hass: HomeAssistant, config_entry: MockConfigEntry
 ) -> None:
     config_entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(config_entry.entry_id)
@@ -102,8 +102,8 @@ def _get_ha_power_state(vizio_power_state: bool | None) -> str:
 
 def _assert_sources_and_volume(attr: dict[str, Any], vizio_device_class: str) -> None:
     """Assert source list, source, and volume level based on attr dict and device class."""
-    assert attr["source_list"] == INPUT_LIST
-    assert attr["source"] == CURRENT_INPUT
+    assert attr[ATTR_INPUT_SOURCE_LIST] == INPUT_LIST
+    assert attr[ATTR_INPUT_SOURCE] == CURRENT_INPUT
     assert (
         attr["volume_level"]
         == float(int(MAX_VOLUME[vizio_device_class] / 2))
@@ -112,7 +112,7 @@ def _assert_sources_and_volume(attr: dict[str, Any], vizio_device_class: str) ->
 
 
 def _get_attr_and_assert_base_attr(
-    hass: HomeAssistantType, device_class: str, power_state: str
+    hass: HomeAssistant, device_class: str, power_state: str
 ) -> dict[str, Any]:
     """Return entity attributes  after asserting name, device class, and power state."""
     attr = hass.states.get(ENTITY_ID).attributes
@@ -141,9 +141,7 @@ async def _cm_for_test_setup_without_apps(
         yield
 
 
-async def _test_setup_tv(
-    hass: HomeAssistantType, vizio_power_state: bool | None
-) -> None:
+async def _test_setup_tv(hass: HomeAssistant, vizio_power_state: bool | None) -> None:
     """Test Vizio TV entity setup."""
     ha_power_state = _get_ha_power_state(vizio_power_state)
 
@@ -159,14 +157,16 @@ async def _test_setup_tv(
     ):
         await _add_config_entry_to_hass(hass, config_entry)
 
-        attr = _get_attr_and_assert_base_attr(hass, DEVICE_CLASS_TV, ha_power_state)
+        attr = _get_attr_and_assert_base_attr(
+            hass, MediaPlayerDeviceClass.TV, ha_power_state
+        )
         if ha_power_state == STATE_ON:
             _assert_sources_and_volume(attr, VIZIO_DEVICE_CLASS_TV)
             assert "sound_mode" not in attr
 
 
 async def _test_setup_speaker(
-    hass: HomeAssistantType, vizio_power_state: bool | None
+    hass: HomeAssistant, vizio_power_state: bool | None
 ) -> None:
     """Test Vizio Speaker entity setup."""
     ha_power_state = _get_ha_power_state(vizio_power_state)
@@ -193,7 +193,7 @@ async def _test_setup_speaker(
             await _add_config_entry_to_hass(hass, config_entry)
 
             attr = _get_attr_and_assert_base_attr(
-                hass, DEVICE_CLASS_SPEAKER, ha_power_state
+                hass, MediaPlayerDeviceClass.SPEAKER, ha_power_state
             )
             if ha_power_state == STATE_ON:
                 _assert_sources_and_volume(attr, VIZIO_DEVICE_CLASS_SPEAKER)
@@ -203,7 +203,7 @@ async def _test_setup_speaker(
 
 @asynccontextmanager
 async def _cm_for_test_setup_tv_with_apps(
-    hass: HomeAssistantType, device_config: dict[str, Any], app_config: dict[str, Any]
+    hass: HomeAssistant, device_config: dict[str, Any], app_config: dict[str, Any]
 ) -> None:
     """Context manager to setup test for Vizio TV with support for apps."""
     config_entry = MockConfigEntry(
@@ -220,7 +220,9 @@ async def _cm_for_test_setup_tv_with_apps(
         ):
             await _add_config_entry_to_hass(hass, config_entry)
 
-            attr = _get_attr_and_assert_base_attr(hass, DEVICE_CLASS_TV, STATE_ON)
+            attr = _get_attr_and_assert_base_attr(
+                hass, MediaPlayerDeviceClass.TV, STATE_ON
+            )
             assert (
                 attr["volume_level"]
                 == float(int(MAX_VOLUME[VIZIO_DEVICE_CLASS_TV] / 2))
@@ -238,11 +240,11 @@ def _assert_source_list_with_apps(
         if app_to_remove in list_to_test:
             list_to_test.remove(app_to_remove)
 
-    assert attr["source_list"] == list_to_test
+    assert attr[ATTR_INPUT_SOURCE_LIST] == list_to_test
 
 
 async def _test_service(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     domain: str,
     vizio_func_name: str,
     ha_service_name: str,
@@ -272,7 +274,7 @@ async def _test_service(
 
 
 async def test_speaker_on(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update: pytest.fixture,
 ) -> None:
@@ -281,7 +283,7 @@ async def test_speaker_on(
 
 
 async def test_speaker_off(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update: pytest.fixture,
 ) -> None:
@@ -290,7 +292,7 @@ async def test_speaker_off(
 
 
 async def test_speaker_unavailable(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update: pytest.fixture,
 ) -> None:
@@ -299,7 +301,7 @@ async def test_speaker_unavailable(
 
 
 async def test_init_tv_on(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update: pytest.fixture,
 ) -> None:
@@ -308,7 +310,7 @@ async def test_init_tv_on(
 
 
 async def test_init_tv_off(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update: pytest.fixture,
 ) -> None:
@@ -317,7 +319,7 @@ async def test_init_tv_off(
 
 
 async def test_init_tv_unavailable(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update: pytest.fixture,
 ) -> None:
@@ -326,7 +328,7 @@ async def test_init_tv_unavailable(
 
 
 async def test_setup_unavailable_speaker(
-    hass: HomeAssistantType, vizio_cant_connect: pytest.fixture
+    hass: HomeAssistant, vizio_cant_connect: pytest.fixture
 ) -> None:
     """Test speaker entity sets up as unavailable."""
     config_entry = MockConfigEntry(
@@ -338,7 +340,7 @@ async def test_setup_unavailable_speaker(
 
 
 async def test_setup_unavailable_tv(
-    hass: HomeAssistantType, vizio_cant_connect: pytest.fixture
+    hass: HomeAssistant, vizio_cant_connect: pytest.fixture
 ) -> None:
     """Test TV entity sets up as unavailable."""
     config_entry = MockConfigEntry(
@@ -350,7 +352,7 @@ async def test_setup_unavailable_tv(
 
 
 async def test_services(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update: pytest.fixture,
 ) -> None:
@@ -439,7 +441,7 @@ async def test_services(
 
 
 async def test_options_update(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update: pytest.fixture,
 ) -> None:
@@ -461,7 +463,7 @@ async def test_options_update(
 
 
 async def _test_update_availability_switch(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     initial_power_state: bool | None,
     final_power_state: bool | None,
     caplog: pytest.fixture,
@@ -504,7 +506,7 @@ async def _test_update_availability_switch(
 
 
 async def test_update_unavailable_to_available(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update: pytest.fixture,
     caplog: pytest.fixture,
@@ -514,7 +516,7 @@ async def test_update_unavailable_to_available(
 
 
 async def test_update_available_to_unavailable(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update: pytest.fixture,
     caplog: pytest.fixture,
@@ -524,7 +526,7 @@ async def test_update_available_to_unavailable(
 
 
 async def test_setup_with_apps(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update_with_apps: pytest.fixture,
     caplog: pytest.fixture,
@@ -535,8 +537,8 @@ async def test_setup_with_apps(
     ):
         attr = hass.states.get(ENTITY_ID).attributes
         _assert_source_list_with_apps(list(INPUT_LIST_WITH_APPS + APP_NAME_LIST), attr)
-        assert CURRENT_APP in attr["source_list"]
-        assert attr["source"] == CURRENT_APP
+        assert CURRENT_APP in attr[ATTR_INPUT_SOURCE_LIST]
+        assert attr[ATTR_INPUT_SOURCE] == CURRENT_APP
         assert attr["app_name"] == CURRENT_APP
         assert "app_id" not in attr
 
@@ -552,7 +554,7 @@ async def test_setup_with_apps(
 
 
 async def test_setup_with_apps_include(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update_with_apps: pytest.fixture,
     caplog: pytest.fixture,
@@ -563,14 +565,14 @@ async def test_setup_with_apps_include(
     ):
         attr = hass.states.get(ENTITY_ID).attributes
         _assert_source_list_with_apps(list(INPUT_LIST_WITH_APPS + [CURRENT_APP]), attr)
-        assert CURRENT_APP in attr["source_list"]
-        assert attr["source"] == CURRENT_APP
+        assert CURRENT_APP in attr[ATTR_INPUT_SOURCE_LIST]
+        assert attr[ATTR_INPUT_SOURCE] == CURRENT_APP
         assert attr["app_name"] == CURRENT_APP
         assert "app_id" not in attr
 
 
 async def test_setup_with_apps_exclude(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update_with_apps: pytest.fixture,
     caplog: pytest.fixture,
@@ -581,14 +583,14 @@ async def test_setup_with_apps_exclude(
     ):
         attr = hass.states.get(ENTITY_ID).attributes
         _assert_source_list_with_apps(list(INPUT_LIST_WITH_APPS + [CURRENT_APP]), attr)
-        assert CURRENT_APP in attr["source_list"]
-        assert attr["source"] == CURRENT_APP
+        assert CURRENT_APP in attr[ATTR_INPUT_SOURCE_LIST]
+        assert attr[ATTR_INPUT_SOURCE] == CURRENT_APP
         assert attr["app_name"] == CURRENT_APP
         assert "app_id" not in attr
 
 
 async def test_setup_with_apps_additional_apps_config(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update_with_apps: pytest.fixture,
     caplog: pytest.fixture,
@@ -600,7 +602,7 @@ async def test_setup_with_apps_additional_apps_config(
         ADDITIONAL_APP_CONFIG["config"],
     ):
         attr = hass.states.get(ENTITY_ID).attributes
-        assert attr["source_list"].count(CURRENT_APP) == 1
+        assert attr[ATTR_INPUT_SOURCE_LIST].count(CURRENT_APP) == 1
         _assert_source_list_with_apps(
             list(
                 INPUT_LIST_WITH_APPS
@@ -615,8 +617,8 @@ async def test_setup_with_apps_additional_apps_config(
             ),
             attr,
         )
-        assert ADDITIONAL_APP_CONFIG["name"] in attr["source_list"]
-        assert attr["source"] == ADDITIONAL_APP_CONFIG["name"]
+        assert ADDITIONAL_APP_CONFIG["name"] in attr[ATTR_INPUT_SOURCE_LIST]
+        assert attr[ATTR_INPUT_SOURCE] == ADDITIONAL_APP_CONFIG["name"]
         assert attr["app_name"] == ADDITIONAL_APP_CONFIG["name"]
         assert "app_id" not in attr
 
@@ -654,7 +656,7 @@ async def test_setup_with_apps_additional_apps_config(
         assert not service_call2.called
 
 
-def test_invalid_apps_config(hass: HomeAssistantType):
+def test_invalid_apps_config(hass: HomeAssistant):
     """Test that schema validation fails on certain conditions."""
     with raises(vol.Invalid):
         vol.Schema(vol.All(VIZIO_SCHEMA, validate_apps))(MOCK_TV_APPS_FAILURE)
@@ -664,7 +666,7 @@ def test_invalid_apps_config(hass: HomeAssistantType):
 
 
 async def test_setup_with_unknown_app_config(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update_with_apps: pytest.fixture,
     caplog: pytest.fixture,
@@ -675,13 +677,13 @@ async def test_setup_with_unknown_app_config(
     ):
         attr = hass.states.get(ENTITY_ID).attributes
         _assert_source_list_with_apps(list(INPUT_LIST_WITH_APPS + APP_NAME_LIST), attr)
-        assert attr["source"] == UNKNOWN_APP
+        assert attr[ATTR_INPUT_SOURCE] == UNKNOWN_APP
         assert attr["app_name"] == UNKNOWN_APP
         assert attr["app_id"] == UNKNOWN_APP_CONFIG
 
 
 async def test_setup_with_no_running_app(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update_with_apps: pytest.fixture,
     caplog: pytest.fixture,
@@ -692,13 +694,13 @@ async def test_setup_with_no_running_app(
     ):
         attr = hass.states.get(ENTITY_ID).attributes
         _assert_source_list_with_apps(list(INPUT_LIST_WITH_APPS + APP_NAME_LIST), attr)
-        assert attr["source"] == "CAST"
+        assert attr[ATTR_INPUT_SOURCE] == "CAST"
         assert "app_id" not in attr
         assert "app_name" not in attr
 
 
 async def test_setup_tv_without_mute(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update: pytest.fixture,
 ) -> None:
@@ -715,14 +717,14 @@ async def test_setup_tv_without_mute(
     ):
         await _add_config_entry_to_hass(hass, config_entry)
 
-        attr = _get_attr_and_assert_base_attr(hass, DEVICE_CLASS_TV, STATE_ON)
+        attr = _get_attr_and_assert_base_attr(hass, MediaPlayerDeviceClass.TV, STATE_ON)
         _assert_sources_and_volume(attr, VIZIO_DEVICE_CLASS_TV)
         assert "sound_mode" not in attr
         assert "is_volume_muted" not in attr
 
 
 async def test_apps_update(
-    hass: HomeAssistantType,
+    hass: HomeAssistant,
     vizio_connect: pytest.fixture,
     vizio_update_with_apps: pytest.fixture,
     caplog: pytest.fixture,
@@ -737,7 +739,7 @@ async def test_apps_update(
         ):
             # Check source list, remove TV inputs, and verify that the integration is
             # using the default APPS list
-            sources = hass.states.get(ENTITY_ID).attributes["source_list"]
+            sources = hass.states.get(ENTITY_ID).attributes[ATTR_INPUT_SOURCE_LIST]
             apps = list(set(sources) - set(INPUT_LIST))
             assert len(apps) == len(APPS)
 
@@ -749,6 +751,21 @@ async def test_apps_update(
                 await hass.async_block_till_done()
                 # Check source list, remove TV inputs, and verify that the integration is
                 # now using the APP_LIST list
-                sources = hass.states.get(ENTITY_ID).attributes["source_list"]
+                sources = hass.states.get(ENTITY_ID).attributes[ATTR_INPUT_SOURCE_LIST]
                 apps = list(set(sources) - set(INPUT_LIST))
                 assert len(apps) == len(APP_LIST)
+
+
+async def test_vizio_update_with_apps_on_input(
+    hass: HomeAssistant, vizio_connect, vizio_update_with_apps_on_input
+) -> None:
+    """Test a vizio TV with apps that is on a TV input."""
+    config_entry = MockConfigEntry(
+        domain=DOMAIN,
+        data=vol.Schema(VIZIO_SCHEMA)(MOCK_USER_VALID_TV_CONFIG),
+        unique_id=UNIQUE_ID,
+    )
+    await _add_config_entry_to_hass(hass, config_entry)
+    attr = _get_attr_and_assert_base_attr(hass, MediaPlayerDeviceClass.TV, STATE_ON)
+    # app ID should not be in the attributes
+    assert "app_id" not in attr

@@ -24,5 +24,12 @@
   "homekit": {
     "models": ["Rachio"]
   },
-  "iot_class": "cloud_push"
+  "zeroconf": [
+    {
+      "type": "_http._tcp.local.",
+      "name": "rachio*"
+    }
+  ],
+  "iot_class": "cloud_push",
+  "loggers": ["rachiopy"]
 }

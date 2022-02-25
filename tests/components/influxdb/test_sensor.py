@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
+from http import HTTPStatus
 from unittest.mock import MagicMock, patch
 
 from influxdb.exceptions import InfluxDBClientError, InfluxDBServerError
@@ -43,13 +44,22 @@ BASE_V1_QUERY = {
     "queries": [
         {
             "name": "test",
+            "unique_id": "unique_test_id",
             "measurement": "measurement",
             "where": "where",
             "field": "field",
         }
     ],
 }
-BASE_V2_QUERY = {"queries_flux": [{"name": "test", "query": "query"}]}
+BASE_V2_QUERY = {
+    "queries_flux": [
+        {
+            "name": "test",
+            "unique_id": "unique_test_id",
+            "query": "query",
+        }
+    ]
+}
 
 
 @dataclass
@@ -231,6 +241,7 @@ async def test_minimal_config(hass, mock_client, config_ext, queries, set_query_
                 "queries": [
                     {
                         "name": "test",
+                        "unique_id": "unique_test_id",
                         "unit_of_measurement": "unit",
                         "measurement": "measurement",
                         "where": "where",
@@ -259,6 +270,7 @@ async def test_minimal_config(hass, mock_client, config_ext, queries, set_query_
                 "queries_flux": [
                     {
                         "name": "test",
+                        "unique_id": "unique_test_id",
                         "unit_of_measurement": "unit",
                         "range_start": "start",
                         "range_stop": "end",
@@ -313,7 +325,7 @@ async def test_config_failure(hass, config_ext):
 async def test_state_matches_query_result(
     hass, mock_client, config_ext, queries, set_query_mock, make_resultset
 ):
-    """Test state of sensor matches respone from query api."""
+    """Test state of sensor matches response from query api."""
     set_query_mock(mock_client, return_value=make_resultset(42))
 
     sensors = await _setup(hass, config_ext, queries, ["sensor.test"])
@@ -344,7 +356,7 @@ async def test_state_matches_query_result(
 async def test_state_matches_first_query_result_for_multiple_return(
     hass, caplog, mock_client, config_ext, queries, set_query_mock, make_resultset
 ):
-    """Test state of sensor matches respone from query api."""
+    """Test state of sensor matches response from query api."""
     set_query_mock(mock_client, return_value=make_resultset(42, "not used"))
 
     sensors = await _setup(hass, config_ext, queries, ["sensor.test"])
@@ -370,7 +382,7 @@ async def test_state_matches_first_query_result_for_multiple_return(
 async def test_state_for_no_results(
     hass, caplog, mock_client, config_ext, queries, set_query_mock
 ):
-    """Test state of sensor matches respone from query api."""
+    """Test state of sensor matches response from query api."""
     set_query_mock(mock_client)
 
     sensors = await _setup(hass, config_ext, queries, ["sensor.test"])
@@ -416,14 +428,14 @@ async def test_state_for_no_results(
             BASE_V2_CONFIG,
             BASE_V2_QUERY,
             _set_query_mock_v2,
-            ApiException(),
+            ApiException(http_resp=MagicMock()),
         ),
         (
             API_VERSION_2,
             BASE_V2_CONFIG,
             BASE_V2_QUERY,
             _set_query_mock_v2,
-            ApiException(status=400),
+            ApiException(status=HTTPStatus.BAD_REQUEST, http_resp=MagicMock()),
         ),
     ],
     indirect=["mock_client"],
@@ -451,6 +463,7 @@ async def test_error_querying_influx(
                 "queries": [
                     {
                         "name": "test",
+                        "unique_id": "unique_test_id",
                         "measurement": "measurement",
                         "where": "{{ illegal.template }}",
                         "field": "field",
@@ -464,7 +477,15 @@ async def test_error_querying_influx(
         (
             API_VERSION_2,
             BASE_V2_CONFIG,
-            {"queries_flux": [{"name": "test", "query": "{{ illegal.template }}"}]},
+            {
+                "queries_flux": [
+                    {
+                        "name": "test",
+                        "unique_id": "unique_test_id",
+                        "query": "{{ illegal.template }}",
+                    }
+                ]
+            },
             _set_query_mock_v2,
             _make_v2_resultset,
             "query",
@@ -533,7 +554,7 @@ async def test_error_rendering_template(
             BASE_V2_CONFIG,
             BASE_V2_QUERY,
             _set_query_mock_v2,
-            ApiException(),
+            ApiException(http_resp=MagicMock()),
             _make_v2_resultset,
         ),
     ],

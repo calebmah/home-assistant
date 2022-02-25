@@ -1,11 +1,11 @@
 """Support for Hyperion-NG remotes."""
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 import functools
 import logging
 from types import MappingProxyType
-from typing import Any, Callable
+from typing import Any
 
 from hyperion import client, const
 
@@ -19,12 +19,13 @@ from homeassistant.components.light import (
     LightEntity,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import (
     async_dispatcher_connect,
     async_dispatcher_send,
 )
-from homeassistant.helpers.typing import HomeAssistantType
+from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 import homeassistant.util.color as color_util
 
 from . import (
@@ -81,8 +82,10 @@ ICON_EXTERNAL_SOURCE = "mdi:television-ambient-light"
 
 
 async def async_setup_entry(
-    hass: HomeAssistantType, config_entry: ConfigEntry, async_add_entities: Callable
-) -> bool:
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
     """Set up a Hyperion platform from config entry."""
 
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
@@ -119,7 +122,6 @@ async def async_setup_entry(
             )
 
     listen_for_instance_updates(hass, config_entry, instance_add, instance_remove)
-    return True
 
 
 class HyperionBaseLight(LightEntity):
@@ -235,14 +237,14 @@ class HyperionBaseLight(LightEntity):
         return self._unique_id
 
     @property
-    def device_info(self) -> dict[str, Any] | None:
+    def device_info(self) -> DeviceInfo:
         """Return device information."""
-        return {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "name": self._instance_name,
-            "manufacturer": HYPERION_MANUFACTURER_NAME,
-            "model": HYPERION_MODEL_NAME,
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._device_id)},
+            manufacturer=HYPERION_MANUFACTURER_NAME,
+            model=HYPERION_MODEL_NAME,
+            name=self._instance_name,
+        )
 
     def _get_option(self, key: str) -> Any:
         """Get a value from the provided options."""
@@ -524,10 +526,10 @@ class HyperionLight(HyperionBaseLight):
         # color, effect), but this is not possible due to:
         # https://github.com/hyperion-project/hyperion.ng/issues/967
         if not bool(self._client.is_on()):
-            for component in [
+            for component in (
                 const.KEY_COMPONENTID_ALL,
                 const.KEY_COMPONENTID_LEDDEVICE,
-            ]:
+            ):
                 if not await self._client.async_send_set_component(
                     **{
                         const.KEY_COMPONENTSTATE: {
