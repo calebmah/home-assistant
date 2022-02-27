@@ -1,0 +1,15 @@
+{
+  "domain": "ariston",
+  "name": "Ariston",
+  "config_flow": true,
+  "documentation": "https://www.home-assistant.io/integrations/ariston",
+  "requirements": [],
+  "ssdp": [],
+  "zeroconf": [],
+  "homekit": {},
+  "dependencies": [],
+  "codeowners": [
+    "@calebmah"
+  ],
+  "iot_class": "cloud_polling"
+}

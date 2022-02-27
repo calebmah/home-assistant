@@ -28,6 +28,7 @@ FLOWS = [
     "androidtv",
     "apple_tv",
     "arcam_fmj",
+    "ariston",
     "aseko_pool_live",
     "asuswrt",
     "atag",

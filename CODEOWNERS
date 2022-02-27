@@ -74,6 +74,8 @@ tests/components/aprs/* @PhilRW
 homeassistant/components/arcam_fmj/* @elupus
 tests/components/arcam_fmj/* @elupus
 homeassistant/components/arest/* @fabaff
+homeassistant/components/ariston/* @calebmah
+tests/components/ariston/* @calebmah
 homeassistant/components/arris_tg2492lg/* @vanbalken
 homeassistant/components/aseko_pool_live/* @milanmeu
 tests/components/aseko_pool_live/* @milanmeu
