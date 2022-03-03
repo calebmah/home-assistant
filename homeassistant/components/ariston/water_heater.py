@@ -17,6 +17,7 @@ from homeassistant.const import (
     CONF_HOST,
     CONF_PASSWORD,
     CONF_USERNAME,
+    PRECISION_WHOLE,
     TEMP_CELSIUS,
 )
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -106,6 +107,7 @@ class AristonWaterHeater(WaterHeaterEntity):
         self._operation_list = [VAL_OFF, VAL_MANUAL, VAL_SCHEDULE, VAL_ECO]
         self._operation_mode = VAL_OFF
         self._target_temperature = 40
+        self._attr_precision = PRECISION_WHOLE
 
     @property
     def unique_id(self) -> str:

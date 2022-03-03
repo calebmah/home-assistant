@@ -15,6 +15,8 @@ class Ariston:
         self._host = host
         self._token = None
         self._account = None
+        self._username = ""
+        self._password = ""
 
         self._default_params = {"appId": "com.remotethermo.velis"}
         self._post_headers = {"expect": "100-continue"}
@@ -29,8 +31,54 @@ class Ariston:
             headers.update(self._default_headers())
         return headers
 
+    async def _get(self, url, headers=None, params=None) -> aiohttp.ClientResponse:
+        headers = headers if headers else self._default_headers()
+        params = params if params else self._default_params
+        async with self._session.get(
+            url,
+            headers=headers,
+            params=params,
+        ) as resp:
+            resp_read = await resp.read()
+            if resp.status in [200, 500]:
+                self._LOGGER.debug(
+                    "%s status code received: %s", resp.status, resp_read
+                )
+            else:
+                self._LOGGER.warning(
+                    "%s status code received: %s", resp.status, resp_read
+                )
+            if resp.status == 405:
+                self._LOGGER.info("Reauthenticating...")
+                await self.authenticate(self._username, self._password)
+                resp = await self._get(url, headers, params)
+            return resp
+
+    async def _post(
+        self, url, json, headers=None, params=None
+    ) -> aiohttp.ClientResponse:
+        headers = headers if headers else self._default_post_headers()
+        params = params if params else self._default_params
+        async with self._session.post(
+            url,
+            headers=headers,
+            params=params,
+            json=json,
+        ) as resp:
+            if resp.status == 200:
+                self._LOGGER.debug("%s status code received", resp.status)
+            else:
+                self._LOGGER.warning("%s status code received", resp.status)
+            if resp.status == 405:
+                self._LOGGER.info("Reauthenticating...")
+                await self.authenticate(self._username, self._password)
+                resp = await self._post(url, json, headers, params)
+            return resp
+
     async def authenticate(self, username: str, password: str) -> bool:
         """Authenticate with the host."""
+        self._username = username
+        self._password = password
         url = self._host + "/api/v2/accounts/login"
         login_data = {
             "usr": username,
@@ -63,61 +111,38 @@ class Ariston:
     async def get_plants(self):
         """Get available plants."""
         url = self._host + "/api/v2/velis/plants"
-        async with self._session.get(
-            url,
-            headers=self._default_headers(),
-            params=self._default_params,
-        ) as resp:
-            return await resp.json()
+        resp = await self._get(url)
+        return await resp.json()
 
     async def get_plant_data(self, gw_val):
         """Get individual plant data."""
         url = self._host + "/api/v2/velis/medPlantData/" + gw_val
-        async with self._session.get(
-            url,
-            headers=self._default_headers(),
-            params=self._default_params,
-        ) as resp:
-            available = resp.status == 200
-            if available:
-                response = await resp.json()
-                response["available"] = available
-                return response
-            return {"available": available}
+        resp = await self._get(url)
+        available = resp.status == 200
+        if available:
+            response = await resp.json()
+            response["available"] = available
+            return response
+        return {"available": available}
 
     async def set_temperature(self, gw_val, temperature, eco):
         """Set the temperature."""
         url = self._host + "/api/v2/velis/medPlantData/" + gw_val + "/temperature"
         data = {"eco": eco, "new": temperature, "old": 0.0}
-        async with self._session.post(
-            url,
-            headers=self._default_post_headers(),
-            params=self._default_params,
-            json=data,
-        ) as resp:
-            return resp
+        resp = await self._post(url, data)
+        return resp
 
     async def switch(self, gw_val, on_or_off):
         """Switches the heater on or off."""
         url = self._host + "/api/v2/velis/medPlantData/" + gw_val + "/switch"
-        async with self._session.post(
-            url,
-            headers=self._default_post_headers(),
-            params=self._default_params,
-            json=on_or_off,
-        ) as resp:
-            return resp
+        resp = await self._post(url, on_or_off)
+        return resp
 
     async def switch_eco(self, gw_val, on_or_off):
         """Switch the eco mode on or off."""
         url = self._host + "/api/v2/velis/medPlantData/" + gw_val + "/switchEco"
-        async with self._session.post(
-            url,
-            headers=self._default_post_headers(),
-            params=self._default_params,
-            json=on_or_off,
-        ) as resp:
-            return resp
+        resp = await self._post(url, on_or_off)
+        return resp
 
     async def switch_schedule(self, gw_val, on_or_off):
         """Switch the schedule mode on or off."""
@@ -126,10 +151,5 @@ class Ariston:
             data = {"new": 5, "old": 1}
         else:
             data = {"new": 1, "old": 5}
-        async with self._session.post(
-            url,
-            headers=self._default_post_headers(),
-            params=self._default_params,
-            json=data,
-        ) as resp:
-            return resp
+        resp = await self._post(url, data)
+        return resp
