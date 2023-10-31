@@ -1,16 +1,21 @@
 """The Netatmo integration."""
 from __future__ import annotations
 
-from datetime import datetime
 from http import HTTPStatus
 import logging
 import secrets
+from typing import Any
 
 import aiohttp
 import pyatmo
+from pyatmo.const import ALL_SCOPES as NETATMO_SCOPES
 import voluptuous as vol
 
 from homeassistant.components import cloud
+from homeassistant.components.application_credentials import (
+    ClientCredential,
+    async_import_client_credential,
+)
 from homeassistant.components.webhook import (
     async_generate_url as webhook_generate_url,
     async_register as webhook_register,
@@ -21,10 +26,9 @@ from homeassistant.const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
     CONF_WEBHOOK_ID,
-    EVENT_HOMEASSISTANT_STARTED,
     EVENT_HOMEASSISTANT_STOP,
 )
-from homeassistant.core import CoreState, Event, HomeAssistant, ServiceCall
+from homeassistant.core import DOMAIN as HOMEASSISTANT_DOMAIN, HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import (
     aiohttp_client,
@@ -33,9 +37,11 @@ from homeassistant.helpers import (
 )
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.issue_registry import IssueSeverity, async_create_issue
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.typing import ConfigType
 
-from . import api, config_flow
+from . import api
 from .const import (
     AUTH,
     CONF_CLOUDHOOK_URL,
@@ -47,9 +53,6 @@ from .const import (
     DATA_PERSONS,
     DATA_SCHEDULES,
     DOMAIN,
-    NETATMO_SCOPES,
-    OAUTH2_AUTHORIZE,
-    OAUTH2_TOKEN,
     PLATFORMS,
     WEBHOOK_DEACTIVATION,
     WEBHOOK_PUSH_TYPE,
@@ -60,14 +63,17 @@ from .webhook import async_handle_webhook
 _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = vol.Schema(
-    {
-        DOMAIN: vol.Schema(
-            {
-                vol.Required(CONF_CLIENT_ID): cv.string,
-                vol.Required(CONF_CLIENT_SECRET): cv.string,
-            }
-        )
-    },
+    vol.All(
+        cv.deprecated(DOMAIN),
+        {
+            DOMAIN: vol.Schema(
+                {
+                    vol.Required(CONF_CLIENT_ID): cv.string,
+                    vol.Required(CONF_CLIENT_SECRET): cv.string,
+                }
+            )
+        },
+    ),
     extra=vol.ALLOW_EXTRA,
 )
 
@@ -88,16 +94,34 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     if DOMAIN not in config:
         return True
 
-    config_flow.NetatmoFlowHandler.async_register_implementation(
+    await async_import_client_credential(
         hass,
-        config_entry_oauth2_flow.LocalOAuth2Implementation(
-            hass,
-            DOMAIN,
+        DOMAIN,
+        ClientCredential(
             config[DOMAIN][CONF_CLIENT_ID],
             config[DOMAIN][CONF_CLIENT_SECRET],
-            OAUTH2_AUTHORIZE,
-            OAUTH2_TOKEN,
         ),
+    )
+    _LOGGER.warning(
+        "Configuration of Netatmo integration in YAML is deprecated and "
+        "will be removed in a future release; Your existing configuration "
+        "(including OAuth Application Credentials) have been imported into "
+        "the UI automatically and can be safely removed from your "
+        "configuration.yaml file"
+    )
+    async_create_issue(
+        hass,
+        HOMEASSISTANT_DOMAIN,
+        f"deprecated_yaml_{DOMAIN}",
+        breaks_in_ha_version="2024.2.0",
+        is_fixable=False,
+        issue_domain=DOMAIN,
+        severity=IssueSeverity.WARNING,
+        translation_key="deprecated_yaml",
+        translation_placeholders={
+            "domain": DOMAIN,
+            "integration_title": "Netatmo",
+        },
     )
 
     return True
@@ -119,8 +143,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         await session.async_ensure_token_valid()
     except aiohttp.ClientResponseError as ex:
-        _LOGGER.debug("API error: %s (%s)", ex.code, ex.message)
-        if ex.code in (
+        _LOGGER.debug("API error: %s (%s)", ex.status, ex.message)
+        if ex.status in (
             HTTPStatus.BAD_REQUEST,
             HTTPStatus.UNAUTHORIZED,
             HTTPStatus.FORBIDDEN,
@@ -128,9 +152,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise ConfigEntryAuthFailed("Token not valid, trigger renewal") from ex
         raise ConfigEntryNotReady from ex
 
-    if sorted(session.token["scope"]) != sorted(NETATMO_SCOPES):
+    if entry.data["auth_implementation"] == cloud.DOMAIN:
+        required_scopes = {
+            scope
+            for scope in NETATMO_SCOPES
+            if scope not in ("access_doorbell", "read_doorbell")
+        }
+    else:
+        required_scopes = set(NETATMO_SCOPES)
+
+    if not (set(session.token["scope"]) & required_scopes):
         _LOGGER.debug(
-            "Scope is invalid: %s != %s", session.token["scope"], NETATMO_SCOPES
+            "Session is missing scopes: %s",
+            required_scopes - set(session.token["scope"]),
         )
         raise ConfigEntryAuthFailed("Token scope not valid, trigger renewal")
 
@@ -141,13 +175,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
 
     data_handler = NetatmoDataHandler(hass, entry)
-    await data_handler.async_setup()
     hass.data[DOMAIN][entry.entry_id][DATA_HANDLER] = data_handler
-
-    hass.config_entries.async_setup_platforms(entry, PLATFORMS)
+    await data_handler.async_setup()
 
     async def unregister_webhook(
-        call_or_event_or_dt: ServiceCall | Event | datetime | None,
+        _: Any,
     ) -> None:
         if CONF_WEBHOOK_ID not in entry.data:
             return
@@ -166,7 +198,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
 
     async def register_webhook(
-        call_or_event_or_dt: ServiceCall | Event | datetime | None,
+        _: Any,
     ) -> None:
         if CONF_WEBHOOK_ID not in entry.data:
             data = {**entry.data, CONF_WEBHOOK_ID: secrets.token_hex()}
@@ -199,10 +231,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.info("Register Netatmo webhook: %s", webhook_url)
         except pyatmo.ApiError as err:
             _LOGGER.error("Error during webhook registration - %s", err)
-
-        entry.async_on_unload(
-            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, unregister_webhook)
-        )
+        else:
+            entry.async_on_unload(
+                hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, unregister_webhook)
+            )
 
     async def manage_cloudhook(state: cloud.CloudConnectionState) -> None:
         if state is cloud.CloudConnectionState.CLOUD_CONNECTED:
@@ -210,23 +242,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         if state is cloud.CloudConnectionState.CLOUD_DISCONNECTED:
             await unregister_webhook(None)
-            async_call_later(hass, 30, register_webhook)
+            entry.async_on_unload(async_call_later(hass, 30, register_webhook))
 
     if cloud.async_active_subscription(hass):
         if cloud.async_is_connected(hass):
             await register_webhook(None)
-        cloud.async_listen_connection_change(hass, manage_cloudhook)
-
+        entry.async_on_unload(
+            cloud.async_listen_connection_change(hass, manage_cloudhook)
+        )
     else:
-        if hass.state == CoreState.running:
-            await register_webhook(None)
-        else:
-            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, register_webhook)
+        entry.async_on_unload(async_at_started(hass, register_webhook))
 
     hass.services.async_register(DOMAIN, "register_webhook", register_webhook)
     hass.services.async_register(DOMAIN, "unregister_webhook", unregister_webhook)
 
-    entry.add_update_listener(async_config_entry_updated)
+    entry.async_on_unload(entry.add_update_listener(async_config_entry_updated))
 
     return True
 
@@ -254,7 +284,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if CONF_WEBHOOK_ID in entry.data:
         webhook_unregister(hass, entry.data[CONF_WEBHOOK_ID])
-        await data[entry.entry_id][AUTH].async_dropwebhook()
+        try:
+            await data[entry.entry_id][AUTH].async_dropwebhook()
+        except pyatmo.ApiError:
+            _LOGGER.debug("No webhook to be dropped")
         _LOGGER.info("Unregister Netatmo webhook")
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

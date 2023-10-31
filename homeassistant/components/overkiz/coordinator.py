@@ -62,7 +62,7 @@ class OverkizDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Device]]):
             device.protocol in (Protocol.RTS, Protocol.INTERNAL) for device in devices
         )
         self.executions: dict[str, dict[str, str]] = {}
-        self.areas = self._places_to_area(places)
+        self.areas = self._places_to_area(places) if places else None
         self.config_entry_id = config_entry_id
 
     async def _async_update_data(self) -> dict[str, Device]:
@@ -178,7 +178,9 @@ async def on_device_removed(
     base_device_url = event.device_url.split("#")[0]
     registry = dr.async_get(coordinator.hass)
 
-    if registered_device := registry.async_get_device({(DOMAIN, base_device_url)}):
+    if registered_device := registry.async_get_device(
+        identifiers={(DOMAIN, base_device_url)}
+    ):
         registry.async_remove_device(registered_device.id)
 
     if event.device_url:

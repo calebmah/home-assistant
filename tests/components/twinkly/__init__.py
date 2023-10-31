@@ -1,6 +1,5 @@
 """Constants and mock for the twkinly component tests."""
 
-from uuid import uuid4
 
 from aiohttp.client_exceptions import ClientConnectionError
 
@@ -8,6 +7,7 @@ from homeassistant.components.twinkly.const import DEV_NAME
 
 TEST_HOST = "test.twinkly.com"
 TEST_ID = "twinkly_test_device_id"
+TEST_UID = "4c8fccf5-e08a-4173-92d5-49bf479252a2"
 TEST_NAME = "twinkly_test_device_name"
 TEST_NAME_ORIGINAL = "twinkly_test_original_device_name"  # the original (deprecated) name stored in the conf
 TEST_MODEL = "twinkly_test_device_model"
@@ -22,11 +22,16 @@ class ClientMock:
         self.state = True
         self.brightness = {"mode": "enabled", "value": 10}
         self.color = None
+        self.movies = [{"id": 1, "name": "Rainbow"}, {"id": 2, "name": "Flare"}]
+        self.current_movie = {}
+        self.default_mode = "movie"
+        self.mode = None
+        self.version = "2.8.10"
 
-        self.id = str(uuid4())
+        self.id = TEST_UID
         self.device_info = {
             "uuid": self.id,
-            "device_name": self.id,  # we make sure that entity id is different for each test
+            "device_name": TEST_NAME,
             "product_code": TEST_MODEL,
         }
 
@@ -52,6 +57,7 @@ class ClientMock:
         if self.is_offline:
             raise ClientConnectionError()
         self.state = True
+        self.mode = self.default_mode
 
     async def turn_off(self) -> None:
         """Set the mocked off state."""
@@ -78,6 +84,36 @@ class ClientMock:
     async def set_static_colour(self, colour) -> None:
         """Set static color."""
         self.color = colour
+        self.default_mode = "color"
+
+    async def set_cycle_colours(self, colour) -> None:
+        """Set static color."""
+        self.color = colour
+        self.default_mode = "movie"
 
     async def interview(self) -> None:
         """Interview."""
+
+    async def get_saved_movies(self) -> dict:
+        """Get saved movies."""
+        return self.movies
+
+    async def get_current_movie(self) -> dict:
+        """Get current movie."""
+        return self.current_movie
+
+    async def set_current_movie(self, movie_id: int) -> dict:
+        """Set current movie."""
+        self.current_movie = {"id": movie_id}
+
+    async def set_mode(self, mode: str) -> None:
+        """Set mode."""
+        if mode == "off":
+            await self.turn_off()
+        else:
+            await self.turn_on()
+            self.mode = mode
+
+    async def get_firmware_version(self) -> dict:
+        """Get firmware version."""
+        return {"version": self.version}

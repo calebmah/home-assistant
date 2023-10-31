@@ -1,14 +1,14 @@
 """Common entity class for Version integration."""
 
-from homeassistant.helpers.device_registry import DeviceEntryType
-from homeassistant.helpers.entity import DeviceInfo, EntityDescription
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.entity import EntityDescription
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, HOME_ASSISTANT
 from .coordinator import VersionDataUpdateCoordinator
 
 
-class VersionEntity(CoordinatorEntity):
+class VersionEntity(CoordinatorEntity[VersionDataUpdateCoordinator]):
     """Common entity class for Version integration."""
 
     _attr_device_info = DeviceInfo(
@@ -17,8 +17,6 @@ class VersionEntity(CoordinatorEntity):
         manufacturer=HOME_ASSISTANT,
         entry_type=DeviceEntryType.SERVICE,
     )
-
-    coordinator: VersionDataUpdateCoordinator
 
     def __init__(
         self,

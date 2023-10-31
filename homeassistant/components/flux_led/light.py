@@ -19,11 +19,9 @@ from homeassistant.components.light import (
     ATTR_RGBW_COLOR,
     ATTR_RGBWW_COLOR,
     ATTR_WHITE,
-    SUPPORT_EFFECT,
-    SUPPORT_TRANSITION,
     LightEntity,
+    LightEntityFeature,
 )
-from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_platform
 import homeassistant.helpers.config_validation as cv
@@ -178,7 +176,6 @@ async def async_setup_entry(
             FluxLight(
                 coordinator,
                 entry.unique_id or entry.entry_id,
-                entry.data.get(CONF_NAME, entry.title),
                 list(custom_effect_colors),
                 options.get(CONF_CUSTOM_EFFECT_SPEED_PCT, DEFAULT_EFFECT_SPEED),
                 options.get(CONF_CUSTOM_EFFECT_TRANSITION, TRANSITION_GRADUAL),
@@ -187,22 +184,25 @@ async def async_setup_entry(
     )
 
 
-class FluxLight(FluxOnOffEntity, CoordinatorEntity, LightEntity):
+class FluxLight(
+    FluxOnOffEntity, CoordinatorEntity[FluxLedUpdateCoordinator], LightEntity
+):
     """Representation of a Flux light."""
 
-    _attr_supported_features = SUPPORT_TRANSITION | SUPPORT_EFFECT
+    _attr_name = None
+
+    _attr_supported_features = LightEntityFeature.TRANSITION | LightEntityFeature.EFFECT
 
     def __init__(
         self,
         coordinator: FluxLedUpdateCoordinator,
         base_unique_id: str,
-        name: str,
         custom_effect_colors: list[tuple[int, int, int]],
         custom_effect_speed_pct: int,
         custom_effect_transition: str,
     ) -> None:
         """Initialize the light."""
-        super().__init__(coordinator, base_unique_id, name, None)
+        super().__init__(coordinator, base_unique_id, None)
         self._attr_min_mireds = color_temperature_kelvin_to_mired(self._device.max_temp)
         self._attr_max_mireds = color_temperature_kelvin_to_mired(self._device.min_temp)
         self._attr_supported_color_modes = _hass_color_modes(self._device)

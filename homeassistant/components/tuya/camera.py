@@ -4,7 +4,7 @@ from __future__ import annotations
 from tuya_iot import TuyaDevice, TuyaDeviceManager
 
 from homeassistant.components import ffmpeg
-from homeassistant.components.camera import SUPPORT_STREAM, Camera as CameraEntity
+from homeassistant.components.camera import Camera as CameraEntity, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -50,8 +50,9 @@ async def async_setup_entry(
 class TuyaCameraEntity(TuyaEntity, CameraEntity):
     """Tuya Camera Entity."""
 
-    _attr_supported_features = SUPPORT_STREAM
+    _attr_supported_features = CameraEntityFeature.STREAM
     _attr_brand = "Tuya"
+    _attr_name = None
 
     def __init__(
         self,

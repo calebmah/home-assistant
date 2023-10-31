@@ -6,14 +6,14 @@ from typing import Any
 import voluptuous as vol
 from wled import WLED, Device, WLEDConnectionError
 
-from homeassistant.components import zeroconf
+from homeassistant.components import onboarding, zeroconf
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
 from homeassistant.const import CONF_HOST, CONF_MAC
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_KEEP_MASTER_LIGHT, DEFAULT_KEEP_MASTER_LIGHT, DOMAIN
+from .const import CONF_KEEP_MAIN_LIGHT, DEFAULT_KEEP_MAIN_LIGHT, DOMAIN
 
 
 class WLEDFlowHandler(ConfigFlow, domain=DOMAIN):
@@ -97,7 +97,7 @@ class WLEDFlowHandler(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle a flow initiated by zeroconf."""
-        if user_input is not None:
+        if user_input is not None or not onboarding.async_is_onboarded(self.hass):
             return self.async_create_entry(
                 title=self.discovered_device.info.name,
                 data={
@@ -136,9 +136,9 @@ class WLEDOptionsFlowHandler(OptionsFlow):
             data_schema=vol.Schema(
                 {
                     vol.Optional(
-                        CONF_KEEP_MASTER_LIGHT,
+                        CONF_KEEP_MAIN_LIGHT,
                         default=self.config_entry.options.get(
-                            CONF_KEEP_MASTER_LIGHT, DEFAULT_KEEP_MASTER_LIGHT
+                            CONF_KEEP_MAIN_LIGHT, DEFAULT_KEEP_MAIN_LIGHT
                         ),
                     ): bool,
                 }

@@ -12,11 +12,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from . import roku_exception_handler
 from .const import DOMAIN
 from .coordinator import RokuDataUpdateCoordinator
 from .entity import RokuEntity
-from .helpers import format_channel_name
+from .helpers import format_channel_name, roku_exception_handler
 
 
 @dataclass
@@ -96,7 +95,7 @@ class RokuSelectEntityDescription(
 ENTITIES: tuple[RokuSelectEntityDescription, ...] = (
     RokuSelectEntityDescription(
         key="application",
-        name="Application",
+        translation_key="application",
         icon="mdi:application",
         set_fn=_launch_application,
         value_fn=_get_application_name,
@@ -107,7 +106,7 @@ ENTITIES: tuple[RokuSelectEntityDescription, ...] = (
 
 CHANNEL_ENTITY = RokuSelectEntityDescription(
     key="channel",
-    name="Channel",
+    translation_key="channel",
     icon="mdi:television",
     set_fn=_tune_channel,
     value_fn=_get_channel_name,
@@ -123,14 +122,12 @@ async def async_setup_entry(
     """Set up Roku select based on a config entry."""
     coordinator: RokuDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     device: RokuDevice = coordinator.data
-    unique_id = device.info.serial_number
 
     entities: list[RokuSelectEntity] = []
 
     for description in ENTITIES:
         entities.append(
             RokuSelectEntity(
-                device_id=unique_id,
                 coordinator=coordinator,
                 description=description,
             )
@@ -139,7 +136,6 @@ async def async_setup_entry(
     if len(device.channels) > 0:
         entities.append(
             RokuSelectEntity(
-                device_id=unique_id,
                 coordinator=coordinator,
                 description=CHANNEL_ENTITY,
             )
@@ -163,7 +159,7 @@ class RokuSelectEntity(RokuEntity, SelectEntity):
         """Return a set of selectable options."""
         return self.entity_description.options_fn(self.coordinator.data)
 
-    @roku_exception_handler
+    @roku_exception_handler()
     async def async_select_option(self, option: str) -> None:
         """Set the option."""
         await self.entity_description.set_fn(

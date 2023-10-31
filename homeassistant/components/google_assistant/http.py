@@ -59,7 +59,7 @@ def _get_homegraph_jwt(time, iss, key):
 
 async def _get_homegraph_token(
     hass: HomeAssistant, jwt_signed: str
-) -> dict[str, Any] | list[str, Any] | Any:
+) -> dict[str, Any] | list[Any] | Any:
     headers = {
         "Authorization": f"Bearer {jwt_signed}",
         "Content-Type": "application/x-www-form-urlencoded",
@@ -126,7 +126,10 @@ class GoogleConfig(AbstractConfig):
         entity_registry = er.async_get(self.hass)
         registry_entry = entity_registry.async_get(state.entity_id)
         if registry_entry:
-            auxiliary_entity = registry_entry.entity_category is not None
+            auxiliary_entity = (
+                registry_entry.entity_category is not None
+                or registry_entry.hidden_by is not None
+            )
         else:
             auxiliary_entity = False
 
@@ -155,7 +158,7 @@ class GoogleConfig(AbstractConfig):
         """If an entity should have 2FA checked."""
         return True
 
-    async def _async_request_sync_devices(self, agent_user_id: str):
+    async def _async_request_sync_devices(self, agent_user_id: str) -> HTTPStatus:
         if CONF_SERVICE_ACCOUNT in self._config:
             return await self.async_call_homegraph_api(
                 REQUEST_SYNC_BASE_URL, {"agentUserId": agent_user_id}
@@ -217,14 +220,18 @@ class GoogleConfig(AbstractConfig):
             _LOGGER.error("Could not contact %s", url)
             return HTTPStatus.INTERNAL_SERVER_ERROR
 
-    async def async_report_state(self, message, agent_user_id: str):
+    async def async_report_state(
+        self, message: dict[str, Any], agent_user_id: str, event_id: str | None = None
+    ) -> HTTPStatus:
         """Send a state report to Google."""
         data = {
             "requestId": uuid4().hex,
             "agentUserId": agent_user_id,
             "payload": message,
         }
-        await self.async_call_homegraph_api(REPORT_STATE_BASE_URL, data)
+        if event_id is not None:
+            data["eventId"] = event_id
+        return await self.async_call_homegraph_api(REPORT_STATE_BASE_URL, data)
 
 
 class GoogleAssistantView(HomeAssistantView):

@@ -1,14 +1,15 @@
 """Adds config flow for Yale Smart Alarm integration."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
 from yalesmartalarmclient.client import YaleSmartAlarmClient
-from yalesmartalarmclient.exceptions import AuthenticationError, UnknownError
+from yalesmartalarmclient.exceptions import AuthenticationError
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, OptionsFlow
-from homeassistant.const import CONF_CODE, CONF_NAME, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import CONF_NAME, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 import homeassistant.helpers.config_validation as cv
@@ -21,6 +22,7 @@ from .const import (
     DEFAULT_NAME,
     DOMAIN,
     LOGGER,
+    YALE_BASE_ERRORS,
 )
 
 DATA_SCHEMA = vol.Schema(
@@ -42,7 +44,7 @@ DATA_SCHEMA_AUTH = vol.Schema(
 class YaleConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Yale integration."""
 
-    VERSION = 1
+    VERSION = 2
 
     entry: ConfigEntry | None
 
@@ -52,14 +54,7 @@ class YaleConfigFlow(ConfigFlow, domain=DOMAIN):
         """Get the options flow for this handler."""
         return YaleOptionsFlowHandler(config_entry)
 
-    async def async_step_import(self, config: dict[str, Any]) -> FlowResult:
-        """Import a configuration from config.yaml."""
-
-        return await self.async_step_user(user_input=config)
-
-    async def async_step_reauth(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> FlowResult:
         """Handle initiation of re-authentication with Yale."""
         self.entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
         return await self.async_step_reauth_confirm()
@@ -81,7 +76,7 @@ class YaleConfigFlow(ConfigFlow, domain=DOMAIN):
             except AuthenticationError as error:
                 LOGGER.error("Authentication failed. Check credentials %s", error)
                 errors = {"base": "invalid_auth"}
-            except (ConnectionError, TimeoutError, UnknownError) as error:
+            except YALE_BASE_ERRORS as error:
                 LOGGER.error("Connection to API failed %s", error)
                 errors = {"base": "cannot_connect"}
 
@@ -124,7 +119,7 @@ class YaleConfigFlow(ConfigFlow, domain=DOMAIN):
             except AuthenticationError as error:
                 LOGGER.error("Authentication failed. Check credentials %s", error)
                 errors = {"base": "invalid_auth"}
-            except (ConnectionError, TimeoutError, UnknownError) as error:
+            except YALE_BASE_ERRORS as error:
                 LOGGER.error("Connection to API failed %s", error)
                 errors = {"base": "cannot_connect"}
 
@@ -160,32 +155,22 @@ class YaleOptionsFlowHandler(OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage Yale options."""
-        errors = {}
+        errors: dict[str, Any] = {}
 
         if user_input:
-            if len(user_input.get(CONF_CODE, "")) not in [
-                0,
-                user_input[CONF_LOCK_CODE_DIGITS],
-            ]:
-                errors["base"] = "code_format_mismatch"
-            else:
-                return self.async_create_entry(title="", data=user_input)
+            return self.async_create_entry(data=user_input)
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
                     vol.Optional(
-                        CONF_CODE,
-                        description={
-                            "suggested_value": self.entry.options.get(CONF_CODE)
-                        },
-                    ): str,
-                    vol.Optional(
                         CONF_LOCK_CODE_DIGITS,
-                        default=self.entry.options.get(
-                            CONF_LOCK_CODE_DIGITS, DEFAULT_LOCK_CODE_DIGITS
-                        ),
+                        description={
+                            "suggested_value": self.entry.options.get(
+                                CONF_LOCK_CODE_DIGITS, DEFAULT_LOCK_CODE_DIGITS
+                            )
+                        },
                     ): int,
                 }
             ),

@@ -4,11 +4,10 @@ from __future__ import annotations
 from collections.abc import Generator
 import contextlib
 import logging
-from typing import cast
 
 from pywemo.exceptions import ActionException
 
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .wemo_device import DeviceCoordinator
@@ -16,10 +15,8 @@ from .wemo_device import DeviceCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
-class WemoEntity(CoordinatorEntity):
+class WemoEntity(CoordinatorEntity[DeviceCoordinator]):
     """Common methods for Wemo entities."""
-
-    coordinator: DeviceCoordinator  # Override CoordinatorEntity.coordinator type.
 
     # Most pyWeMo devices are associated with a single Home Assistant entity. When
     # that is not the case, name_suffix & unique_id_suffix can be used to provide
@@ -56,7 +53,7 @@ class WemoEntity(CoordinatorEntity):
     @property
     def unique_id(self) -> str:
         """Return the id of this WeMo device."""
-        serial_number: str = self.wemo.serialnumber
+        serial_number: str = self.wemo.serial_number
         if suffix := self.unique_id_suffix:
             return f"{serial_number}_{suffix}"
         return serial_number
@@ -91,4 +88,4 @@ class WemoBinaryStateEntity(WemoEntity):
     @property
     def is_on(self) -> bool:
         """Return true if the state is on."""
-        return cast(int, self.wemo.get_state()) != 0
+        return self.wemo.get_state() != 0

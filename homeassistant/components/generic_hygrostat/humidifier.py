@@ -5,25 +5,27 @@ import asyncio
 import logging
 
 from homeassistant.components.humidifier import (
-    PLATFORM_SCHEMA,
-    HumidifierDeviceClass,
-    HumidifierEntity,
-)
-from homeassistant.components.humidifier.const import (
     ATTR_HUMIDITY,
     MODE_AWAY,
     MODE_NORMAL,
-    SUPPORT_MODES,
+    PLATFORM_SCHEMA,
+    HumidifierAction,
+    HumidifierDeviceClass,
+    HumidifierEntity,
+    HumidifierEntityFeature,
 )
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     ATTR_MODE,
     CONF_NAME,
+    CONF_UNIQUE_ID,
     EVENT_HOMEASSISTANT_START,
     SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
     STATE_OFF,
     STATE_ON,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
 )
 from homeassistant.core import DOMAIN as HA_DOMAIN, HomeAssistant, callback
 from homeassistant.helpers import condition
@@ -57,7 +59,6 @@ _LOGGER = logging.getLogger(__name__)
 
 ATTR_SAVED_HUMIDITY = "saved_humidity"
 
-SUPPORT_FLAGS = 0
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(HYGROSTAT_SCHEMA.schema)
 
@@ -86,6 +87,7 @@ async def async_setup_platform(
     initial_state = config.get(CONF_INITIAL_STATE)
     away_humidity = config.get(CONF_AWAY_HUMIDITY)
     away_fixed = config.get(CONF_AWAY_FIXED)
+    unique_id = config.get(CONF_UNIQUE_ID)
 
     async_add_entities(
         [
@@ -105,6 +107,7 @@ async def async_setup_platform(
                 away_humidity,
                 away_fixed,
                 sensor_stale_duration,
+                unique_id,
             )
         ]
     )
@@ -112,6 +115,8 @@ async def async_setup_platform(
 
 class GenericHygrostat(HumidifierEntity, RestoreEntity):
     """Representation of a Generic Hygrostat device."""
+
+    _attr_should_poll = False
 
     def __init__(
         self,
@@ -130,6 +135,7 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
         away_humidity,
         away_fixed,
         sensor_stale_duration,
+        unique_id,
     ):
         """Initialize the hygrostat."""
         self._name = name
@@ -148,9 +154,8 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
         self._min_humidity = min_humidity
         self._max_humidity = max_humidity
         self._target_humidity = target_humidity
-        self._support_flags = SUPPORT_FLAGS
         if away_humidity:
-            self._support_flags = SUPPORT_FLAGS | SUPPORT_MODES
+            self._attr_supported_features |= HumidifierEntityFeature.MODES
         self._away_humidity = away_humidity
         self._away_fixed = away_fixed
         self._sensor_stale_duration = sensor_stale_duration
@@ -158,6 +163,8 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
         self._is_away = False
         if not self._device_class:
             self._device_class = HumidifierDeviceClass.HUMIDIFIER
+        self._attr_action = HumidifierAction.IDLE
+        self._attr_unique_id = unique_id
 
     async def async_added_to_hass(self):
         """Run when entity about to be added."""
@@ -172,12 +179,24 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
         )
 
         if self._keep_alive:
-            async_track_time_interval(self.hass, self._async_operate, self._keep_alive)
+            self.async_on_remove(
+                async_track_time_interval(
+                    self.hass, self._async_operate, self._keep_alive
+                )
+            )
 
-        @callback
         async def _async_startup(event):
             """Init on startup."""
             sensor_state = self.hass.states.get(self._sensor_entity_id)
+            if sensor_state is None or sensor_state.state in (
+                STATE_UNKNOWN,
+                STATE_UNAVAILABLE,
+            ):
+                _LOGGER.debug(
+                    "The sensor state is %s, initialization is delayed",
+                    sensor_state.state if sensor_state is not None else "None",
+                )
+                return
             await self._async_sensor_changed(self._sensor_entity_id, None, sensor_state)
 
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, _async_startup)
@@ -208,6 +227,12 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
 
         await _async_startup(None)  # init the sensor
 
+    async def async_will_remove_from_hass(self) -> None:
+        """Run when entity will be removed from hass."""
+        if self._remove_stale_tracking:
+            self._remove_stale_tracking()
+        return await super().async_will_remove_from_hass()
+
     @property
     def available(self):
         """Return True if entity is available."""
@@ -221,11 +246,6 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
         return None
 
     @property
-    def should_poll(self):
-        """Return the polling state."""
-        return False
-
-    @property
     def name(self):
         """Return the name of the hygrostat."""
         return self._name
@@ -234,6 +254,11 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
     def is_on(self):
         """Return true if the hygrostat is on."""
         return self._state
+
+    @property
+    def current_humidity(self):
+        """Return the measured humidity."""
+        return self._cur_humidity
 
     @property
     def target_humidity(self):
@@ -267,7 +292,7 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
             return
         self._state = True
         await self._async_operate(force=True)
-        await self.async_update_ha_state()
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs):
         """Turn hygrostat off."""
@@ -276,21 +301,21 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
         self._state = False
         if self._is_device_active:
             await self._async_device_turn_off()
-        await self.async_update_ha_state()
+        self.async_write_ha_state()
 
-    async def async_set_humidity(self, humidity: int):
+    async def async_set_humidity(self, humidity: int) -> None:
         """Set new target humidity."""
         if humidity is None:
             return
 
         if self._is_away and self._away_fixed:
             self._saved_target_humidity = humidity
-            await self.async_update_ha_state()
+            self.async_write_ha_state()
             return
 
         self._target_humidity = humidity
-        await self._async_operate(force=True)
-        await self.async_update_ha_state()
+        await self._async_operate()
+        self.async_write_ha_state()
 
     @property
     def min_humidity(self):
@@ -310,7 +335,6 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
         # Get default humidity from super class
         return super().max_humidity
 
-    @callback
     async def _async_sensor_changed(self, entity_id, old_state, new_state):
         """Handle ambient humidity changes."""
         if new_state is None:
@@ -327,9 +351,8 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
 
         await self._async_update_humidity(new_state.state)
         await self._async_operate()
-        await self.async_update_ha_state()
+        self.async_write_ha_state()
 
-    @callback
     async def _async_sensor_not_responding(self, now=None):
         """Handle sensor stale event."""
 
@@ -345,6 +368,15 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
         """Handle humidifier switch state changes."""
         if new_state is None:
             return
+
+        if new_state.state == STATE_ON:
+            if self._device_class == HumidifierDeviceClass.DEHUMIDIFIER:
+                self._attr_action = HumidifierAction.DRYING
+            else:
+                self._attr_action = HumidifierAction.HUMIDIFYING
+        else:
+            self._attr_action = HumidifierAction.IDLE
+
         self.async_schedule_update_ha_state()
 
     async def _async_update_humidity(self, humidity):
@@ -368,8 +400,10 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
                 self._active = True
                 force = True
                 _LOGGER.info(
-                    "Obtained current and target humidity. "
-                    "Generic hygrostat active. %s, %s",
+                    (
+                        "Obtained current and target humidity. "
+                        "Generic hygrostat active. %s, %s"
+                    ),
                     self._cur_humidity,
                     self._target_humidity,
                 )
@@ -417,27 +451,19 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
                 elif time is not None:
                     # The time argument is passed only in keep-alive case
                     await self._async_device_turn_on()
-            else:
-                if (
-                    self._device_class == HumidifierDeviceClass.HUMIDIFIER and too_dry
-                ) or (
-                    self._device_class == HumidifierDeviceClass.DEHUMIDIFIER and too_wet
-                ):
-                    _LOGGER.info("Turning on humidifier %s", self._switch_entity_id)
-                    await self._async_device_turn_on()
-                elif time is not None:
-                    # The time argument is passed only in keep-alive case
-                    await self._async_device_turn_off()
+            elif (
+                self._device_class == HumidifierDeviceClass.HUMIDIFIER and too_dry
+            ) or (self._device_class == HumidifierDeviceClass.DEHUMIDIFIER and too_wet):
+                _LOGGER.info("Turning on humidifier %s", self._switch_entity_id)
+                await self._async_device_turn_on()
+            elif time is not None:
+                # The time argument is passed only in keep-alive case
+                await self._async_device_turn_off()
 
     @property
     def _is_device_active(self):
         """If the toggleable device is currently active."""
         return self.hass.states.is_state(self._switch_entity_id, STATE_ON)
-
-    @property
-    def supported_features(self):
-        """Return the list of supported features."""
-        return self._support_flags
 
     async def _async_device_turn_on(self):
         """Turn humidifier toggleable device on."""
@@ -449,7 +475,7 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
         data = {ATTR_ENTITY_ID: self._switch_entity_id}
         await self.hass.services.async_call(HA_DOMAIN, SERVICE_TURN_OFF, data)
 
-    async def async_set_mode(self, mode: str):
+    async def async_set_mode(self, mode: str) -> None:
         """Set new mode.
 
         This method must be run in the event loop and returns a coroutine.
@@ -473,4 +499,4 @@ class GenericHygrostat(HumidifierEntity, RestoreEntity):
             )
             await self._async_operate(force=True)
 
-        await self.async_update_ha_state()
+        self.async_write_ha_state()

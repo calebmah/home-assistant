@@ -1,35 +1,35 @@
 """The ViCare integration."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 import logging
+import os
+from typing import Any
 
 from PyViCare.PyViCare import PyViCare
 from PyViCare.PyViCareDevice import Device
-import voluptuous as vol
 
-from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_CLIENT_ID, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
-import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.storage import STORAGE_DIR
-from homeassistant.helpers.typing import ConfigType
 
 from .const import (
-    CONF_CIRCUIT,
     CONF_HEATING_TYPE,
-    DEFAULT_HEATING_TYPE,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     HEATING_TYPE_TO_CREATOR_METHOD,
     PLATFORMS,
     VICARE_API,
     VICARE_DEVICE_CONFIG,
+    VICARE_DEVICE_CONFIG_LIST,
     HeatingType,
 )
 
 _LOGGER = logging.getLogger(__name__)
+_TOKEN_FILENAME = "vicare_token.save"
 
 
 @dataclass()
@@ -39,48 +39,11 @@ class ViCareRequiredKeysMixin:
     value_getter: Callable[[Device], bool]
 
 
-CONFIG_SCHEMA = vol.Schema(
-    vol.All(
-        cv.deprecated(DOMAIN),
-        {
-            DOMAIN: vol.All(
-                cv.deprecated(CONF_CIRCUIT),
-                cv.deprecated(DOMAIN),
-                vol.Schema(
-                    {
-                        vol.Required(CONF_USERNAME): cv.string,
-                        vol.Required(CONF_PASSWORD): cv.string,
-                        vol.Required(CONF_CLIENT_ID): cv.string,
-                        vol.Optional(
-                            CONF_CIRCUIT
-                        ): int,  # Ignored: All circuits are now supported. Will be removed when switching to Setup via UI.
-                        vol.Optional(
-                            CONF_HEATING_TYPE, default=DEFAULT_HEATING_TYPE.value
-                        ): vol.In([e.value for e in HeatingType]),
-                    }
-                ),
-            )
-        },
-    ),
-    extra=vol.ALLOW_EXTRA,
-)
+@dataclass()
+class ViCareRequiredKeysMixinWithSet(ViCareRequiredKeysMixin):
+    """Mixin for required keys with setter."""
 
-
-async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Set up the ViCare component from yaml."""
-    if DOMAIN not in config:
-        # Setup via UI. No need to continue yaml-based setup
-        return True
-
-    hass.async_create_task(
-        hass.config_entries.flow.async_init(
-            DOMAIN,
-            context={"source": SOURCE_IMPORT},
-            data=config[DOMAIN],
-        )
-    )
-
-    return True
+    value_setter: Callable[[Device], bool]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -92,12 +55,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.async_add_executor_job(setup_vicare_api, hass, entry)
 
-    hass.config_entries.async_setup_platforms(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
 
 
-def vicare_login(hass, entry_data):
+def vicare_login(hass: HomeAssistant, entry_data: Mapping[str, Any]) -> PyViCare:
     """Login via PyVicare API."""
     vicare_api = PyViCare()
     vicare_api.setCacheDuration(DEFAULT_SCAN_INTERVAL)
@@ -105,12 +68,12 @@ def vicare_login(hass, entry_data):
         entry_data[CONF_USERNAME],
         entry_data[CONF_PASSWORD],
         entry_data[CONF_CLIENT_ID],
-        hass.config.path(STORAGE_DIR, "vicare_token.save"),
+        hass.config.path(STORAGE_DIR, _TOKEN_FILENAME),
     )
     return vicare_api
 
 
-def setup_vicare_api(hass, entry):
+def setup_vicare_api(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Set up PyVicare API."""
     vicare_api = vicare_login(hass, entry.data)
 
@@ -120,7 +83,9 @@ def setup_vicare_api(hass, entry):
         )
 
     # Currently we only support a single device
-    device = vicare_api.devices[0]
+    device_list = vicare_api.devices
+    device = device_list[0]
+    hass.data[DOMAIN][entry.entry_id][VICARE_DEVICE_CONFIG_LIST] = device_list
     hass.data[DOMAIN][entry.entry_id][VICARE_DEVICE_CONFIG] = device
     hass.data[DOMAIN][entry.entry_id][VICARE_API] = getattr(
         device,
@@ -133,5 +98,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id)
+
+    with suppress(FileNotFoundError):
+        await hass.async_add_executor_job(
+            os.remove, hass.config.path(STORAGE_DIR, _TOKEN_FILENAME)
+        )
 
     return unload_ok
