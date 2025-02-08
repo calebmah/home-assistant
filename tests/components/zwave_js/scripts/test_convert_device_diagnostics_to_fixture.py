@@ -1,4 +1,5 @@
 """Test convert_device_diagnostics_to_fixture script."""
+
 import copy
 import json
 from pathlib import Path
@@ -36,6 +37,10 @@ def test_fixture_functions() -> None:
     old_diagnostics_format_data["data"]["state"]["values"] = list(
         old_diagnostics_format_data["data"]["state"]["values"].values()
     )
+    old_diagnostics_format_data["data"]["state"]["endpoints"] = list(
+        old_diagnostics_format_data["data"]["state"]["endpoints"].values()
+    )
+
     assert (
         extract_fixture_data(old_diagnostics_format_data)
         == old_diagnostics_format_data["data"]["state"]
@@ -54,7 +59,6 @@ def test_load_file() -> None:
 
 def test_main(capfd: pytest.CaptureFixture[str]) -> None:
     """Test main function."""
-    Path(__file__).parents[1] / "fixtures" / "zooz_zse44_state.json"
     fixture_str = load_fixture("zwave_js/zooz_zse44_state.json")
     fixture_dict = json.loads(fixture_str)
 
@@ -71,9 +75,12 @@ def test_main(capfd: pytest.CaptureFixture[str]) -> None:
 
     # Check file dump
     args.append("--file")
-    with patch.object(sys, "argv", args), patch(
-        "homeassistant.components.zwave_js.scripts.convert_device_diagnostics_to_fixture.Path.write_text"
-    ) as write_text_mock:
+    with (
+        patch.object(sys, "argv", args),
+        patch(
+            "homeassistant.components.zwave_js.scripts.convert_device_diagnostics_to_fixture.Path.write_text"
+        ) as write_text_mock,
+    ):
         main()
 
     assert len(write_text_mock.call_args_list) == 1

@@ -1,4 +1,5 @@
 """Script to convert a device diagnostics file to a fixture."""
+
 from __future__ import annotations
 
 import argparse
@@ -24,9 +25,7 @@ def get_arguments() -> argparse.Namespace:
         ),
     )
 
-    arguments = parser.parse_args()
-
-    return arguments
+    return parser.parse_args()
 
 
 def get_fixtures_dir_path(data: dict) -> Path:
@@ -60,10 +59,12 @@ def extract_fixture_data(diagnostics_data: Any) -> dict:
     ):
         raise ValueError("Invalid diagnostics file format")
     state: dict = diagnostics_data["data"]["state"]
-    if isinstance(state["values"], list):
-        return state
-    values_dict: dict[str, dict] = state.pop("values")
-    state["values"] = list(values_dict.values())
+    if not isinstance(state["values"], list):
+        values_dict: dict[str, dict] = state.pop("values")
+        state["values"] = list(values_dict.values())
+    if not isinstance(state["endpoints"], list):
+        endpoints_dict: dict[str, dict] = state.pop("endpoints")
+        state["endpoints"] = list(endpoints_dict.values())
 
     return state
 

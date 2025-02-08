@@ -1,24 +1,30 @@
 """DataUpdateCoordinator for the wallbox integration."""
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 from http import HTTPStatus
 import logging
-from typing import Any
+from typing import Any, Concatenate
 
 import requests
 from wallbox import Wallbox
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import (
     CHARGER_CURRENCY_KEY,
     CHARGER_DATA_KEY,
     CHARGER_ENERGY_PRICE_KEY,
+    CHARGER_FEATURES_KEY,
     CHARGER_LOCKED_UNLOCKED_KEY,
     CHARGER_MAX_CHARGING_CURRENT_KEY,
+    CHARGER_MAX_ICP_CURRENT_KEY,
+    CHARGER_PLAN_KEY,
+    CHARGER_POWER_BOOST_KEY,
     CHARGER_STATUS_DESCRIPTION_KEY,
     CHARGER_STATUS_ID_KEY,
     CODE_KEY,
@@ -63,6 +69,41 @@ CHARGER_STATUS: dict[int, ChargerStatus] = {
 }
 
 
+def _require_authentication[_WallboxCoordinatorT: WallboxCoordinator, **_P](
+    func: Callable[Concatenate[_WallboxCoordinatorT, _P], Any],
+) -> Callable[Concatenate[_WallboxCoordinatorT, _P], Any]:
+    """Authenticate with decorator using Wallbox API."""
+
+    def require_authentication(
+        self: _WallboxCoordinatorT, *args: _P.args, **kwargs: _P.kwargs
+    ) -> Any:
+        """Authenticate using Wallbox API."""
+        try:
+            self.authenticate()
+            return func(self, *args, **kwargs)
+        except requests.exceptions.HTTPError as wallbox_connection_error:
+            if wallbox_connection_error.response.status_code == HTTPStatus.FORBIDDEN:
+                raise ConfigEntryAuthFailed from wallbox_connection_error
+            raise ConnectionError from wallbox_connection_error
+
+    return require_authentication
+
+
+def _validate(wallbox: Wallbox) -> None:
+    """Authenticate using Wallbox API."""
+    try:
+        wallbox.authenticate()
+    except requests.exceptions.HTTPError as wallbox_connection_error:
+        if wallbox_connection_error.response.status_code == 403:
+            raise InvalidAuth from wallbox_connection_error
+        raise ConnectionError from wallbox_connection_error
+
+
+async def async_validate_input(hass: HomeAssistant, wallbox: Wallbox) -> None:
+    """Get new sensor data for Wallbox component."""
+    await hass.async_add_executor_job(_validate, wallbox)
+
+
 class WallboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Wallbox Coordinator class."""
 
@@ -78,70 +119,55 @@ class WallboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=timedelta(seconds=UPDATE_INTERVAL),
         )
 
-    def _authenticate(self) -> None:
+    def authenticate(self) -> None:
         """Authenticate using Wallbox API."""
-        try:
-            self._wallbox.authenticate()
+        self._wallbox.authenticate()
 
-        except requests.exceptions.HTTPError as wallbox_connection_error:
-            if wallbox_connection_error.response.status_code == HTTPStatus.FORBIDDEN:
-                raise ConfigEntryAuthFailed from wallbox_connection_error
-            raise ConnectionError from wallbox_connection_error
-
-    def _validate(self) -> None:
-        """Authenticate using Wallbox API."""
-        try:
-            self._wallbox.authenticate()
-        except requests.exceptions.HTTPError as wallbox_connection_error:
-            if wallbox_connection_error.response.status_code == 403:
-                raise InvalidAuth from wallbox_connection_error
-            raise ConnectionError from wallbox_connection_error
-
-    async def async_validate_input(self) -> None:
-        """Get new sensor data for Wallbox component."""
-        await self.hass.async_add_executor_job(self._validate)
-
+    @_require_authentication
     def _get_data(self) -> dict[str, Any]:
         """Get new sensor data for Wallbox component."""
-        try:
-            self._authenticate()
-            data: dict[str, Any] = self._wallbox.getChargerStatus(self._station)
-            data[CHARGER_MAX_CHARGING_CURRENT_KEY] = data[CHARGER_DATA_KEY][
-                CHARGER_MAX_CHARGING_CURRENT_KEY
+        data: dict[str, Any] = self._wallbox.getChargerStatus(self._station)
+        data[CHARGER_MAX_CHARGING_CURRENT_KEY] = data[CHARGER_DATA_KEY][
+            CHARGER_MAX_CHARGING_CURRENT_KEY
+        ]
+        data[CHARGER_LOCKED_UNLOCKED_KEY] = data[CHARGER_DATA_KEY][
+            CHARGER_LOCKED_UNLOCKED_KEY
+        ]
+        data[CHARGER_ENERGY_PRICE_KEY] = data[CHARGER_DATA_KEY][
+            CHARGER_ENERGY_PRICE_KEY
+        ]
+        # Only show max_icp_current if power_boost is available in the wallbox unit:
+        if (
+            data[CHARGER_DATA_KEY].get(CHARGER_MAX_ICP_CURRENT_KEY, 0) > 0
+            and CHARGER_POWER_BOOST_KEY
+            in data[CHARGER_DATA_KEY][CHARGER_PLAN_KEY][CHARGER_FEATURES_KEY]
+        ):
+            data[CHARGER_MAX_ICP_CURRENT_KEY] = data[CHARGER_DATA_KEY][
+                CHARGER_MAX_ICP_CURRENT_KEY
             ]
-            data[CHARGER_LOCKED_UNLOCKED_KEY] = data[CHARGER_DATA_KEY][
-                CHARGER_LOCKED_UNLOCKED_KEY
-            ]
-            data[CHARGER_ENERGY_PRICE_KEY] = data[CHARGER_DATA_KEY][
-                CHARGER_ENERGY_PRICE_KEY
-            ]
-            data[
-                CHARGER_CURRENCY_KEY
-            ] = f"{data[CHARGER_DATA_KEY][CHARGER_CURRENCY_KEY][CODE_KEY]}/kWh"
 
-            data[CHARGER_STATUS_DESCRIPTION_KEY] = CHARGER_STATUS.get(
-                data[CHARGER_STATUS_ID_KEY], ChargerStatus.UNKNOWN
-            )
-            return data
-        except (
-            ConnectionError,
-            requests.exceptions.HTTPError,
-        ) as wallbox_connection_error:
-            raise UpdateFailed from wallbox_connection_error
+        data[CHARGER_CURRENCY_KEY] = (
+            f"{data[CHARGER_DATA_KEY][CHARGER_CURRENCY_KEY][CODE_KEY]}/kWh"
+        )
+
+        data[CHARGER_STATUS_DESCRIPTION_KEY] = CHARGER_STATUS.get(
+            data[CHARGER_STATUS_ID_KEY], ChargerStatus.UNKNOWN
+        )
+        return data
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Get new sensor data for Wallbox component."""
         return await self.hass.async_add_executor_job(self._get_data)
 
+    @_require_authentication
     def _set_charging_current(self, charging_current: float) -> None:
         """Set maximum charging current for Wallbox."""
         try:
-            self._authenticate()
             self._wallbox.setMaxChargingCurrent(self._station, charging_current)
         except requests.exceptions.HTTPError as wallbox_connection_error:
             if wallbox_connection_error.response.status_code == 403:
                 raise InvalidAuth from wallbox_connection_error
-            raise ConnectionError from wallbox_connection_error
+            raise
 
     async def async_set_charging_current(self, charging_current: float) -> None:
         """Set maximum charging current for Wallbox."""
@@ -150,25 +176,36 @@ class WallboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         await self.async_request_refresh()
 
-    def _set_energy_cost(self, energy_cost: float) -> None:
-        """Set energy cost for Wallbox."""
+    @_require_authentication
+    def _set_icp_current(self, icp_current: float) -> None:
+        """Set maximum icp current for Wallbox."""
         try:
-            self._authenticate()
-            self._wallbox.setEnergyCost(self._station, energy_cost)
+            self._wallbox.setIcpMaxCurrent(self._station, icp_current)
         except requests.exceptions.HTTPError as wallbox_connection_error:
             if wallbox_connection_error.response.status_code == 403:
                 raise InvalidAuth from wallbox_connection_error
-            raise ConnectionError from wallbox_connection_error
+            raise
+
+    async def async_set_icp_current(self, icp_current: float) -> None:
+        """Set maximum icp current for Wallbox."""
+        await self.hass.async_add_executor_job(self._set_icp_current, icp_current)
+        await self.async_request_refresh()
+
+    @_require_authentication
+    def _set_energy_cost(self, energy_cost: float) -> None:
+        """Set energy cost for Wallbox."""
+
+        self._wallbox.setEnergyCost(self._station, energy_cost)
 
     async def async_set_energy_cost(self, energy_cost: float) -> None:
         """Set energy cost for Wallbox."""
         await self.hass.async_add_executor_job(self._set_energy_cost, energy_cost)
         await self.async_request_refresh()
 
+    @_require_authentication
     def _set_lock_unlock(self, lock: bool) -> None:
         """Set wallbox to locked or unlocked."""
         try:
-            self._authenticate()
             if lock:
                 self._wallbox.lockCharger(self._station)
             else:
@@ -176,25 +213,21 @@ class WallboxCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except requests.exceptions.HTTPError as wallbox_connection_error:
             if wallbox_connection_error.response.status_code == 403:
                 raise InvalidAuth from wallbox_connection_error
-            raise ConnectionError from wallbox_connection_error
+            raise
 
     async def async_set_lock_unlock(self, lock: bool) -> None:
         """Set wallbox to locked or unlocked."""
         await self.hass.async_add_executor_job(self._set_lock_unlock, lock)
         await self.async_request_refresh()
 
+    @_require_authentication
     def _pause_charger(self, pause: bool) -> None:
         """Set wallbox to pause or resume."""
-        try:
-            self._authenticate()
-            if pause:
-                self._wallbox.pauseChargingSession(self._station)
-            else:
-                self._wallbox.resumeChargingSession(self._station)
-        except requests.exceptions.HTTPError as wallbox_connection_error:
-            if wallbox_connection_error.response.status_code == 403:
-                raise InvalidAuth from wallbox_connection_error
-            raise ConnectionError from wallbox_connection_error
+
+        if pause:
+            self._wallbox.pauseChargingSession(self._station)
+        else:
+            self._wallbox.resumeChargingSession(self._station)
 
     async def async_pause_charger(self, pause: bool) -> None:
         """Set wallbox to pause or resume."""

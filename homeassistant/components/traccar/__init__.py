@@ -1,4 +1,5 @@
-"""Support for Traccar."""
+"""Support for Traccar Client."""
+
 from http import HTTPStatus
 
 from aiohttp import web
@@ -8,8 +9,7 @@ from homeassistant.components import webhook
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ID, CONF_WEBHOOK_ID, Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_entry_flow
-import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers import config_entry_flow, config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
@@ -50,12 +50,15 @@ WEBHOOK_SCHEMA = vol.Schema(
         vol.Optional(ATTR_BEARING): vol.Coerce(float),
         vol.Optional(ATTR_SPEED): vol.Coerce(float),
         vol.Optional(ATTR_TIMESTAMP): vol.Coerce(int),
-    }
+    },
+    extra=vol.REMOVE_EXTRA,
 )
 
 
-async def handle_webhook(hass, webhook_id, request):
-    """Handle incoming webhook with Traccar request."""
+async def handle_webhook(
+    hass: HomeAssistant, webhook_id: str, request: web.Request
+) -> web.Response:
+    """Handle incoming webhook with Traccar Client request."""
     try:
         data = WEBHOOK_SCHEMA(dict(request.query))
     except vol.MultipleInvalid as error:
